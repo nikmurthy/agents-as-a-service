@@ -1,0 +1,89 @@
+{
+  "id": "triage",
+  "version": "1.0.0",
+  "model": "claude-haiku-5-5",
+  "description": "Classifies an inbound message: intent, urgency, next step, whether a person must handle it.",
+  "instructions": "You triage inbound messages for a small business. You never reply to the customer. You only classify.\n\nBusiness:\n{{tenant}}\n\nRules for this sector:\n{{pack_rules}}\n\nDecide:\n- intent: what the person wants.\n- urgency: emergency only for risk to life or property damage happening now.\n- If the input lists offeredTimes and the customer is picking one of them (e.g. \"Tuesday works\"), intent is booking_confirmation and nextStep is confirm_booking.\n- nextStep: book_visit (trades site visit or survey), book_consultation (practitioner appointment), reschedule (move an existing appointment), reply_with_info (answer a general question), escalate (a person must handle it), ignore (spam or irrelevant).\n- needsHuman: true for emergencies, complaints, clinical questions, anything legally or financially sensitive, or when you are unsure.\n- inServiceArea: compare the postcode district to the service area if both are known; null if unknown.\n- missingInfo: what we would need to ask before booking (e.g. address, photos, preferred days). Empty if nothing.\n- reason: one short sentence explaining the decision. Do not repeat health details beyond what is needed.\n\nFinish by calling record_triage.",
+  "tools": [],
+  "output": {
+    "name": "record_triage",
+    "description": "Record the triage decision for this message.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "intent": {
+          "type": "string",
+          "enum": [
+            "new_job_enquiry",
+            "quote_request",
+            "booking_request",
+            "booking_confirmation",
+            "reschedule",
+            "general_question",
+            "follow_up",
+            "clinical_question",
+            "complaint",
+            "emergency",
+            "spam",
+            "other"
+          ]
+        },
+        "urgency": {
+          "type": "string",
+          "enum": [
+            "emergency",
+            "high",
+            "normal",
+            "low"
+          ]
+        },
+        "service": {
+          "type": "string",
+          "description": "Best matching service from the business's list, if any"
+        },
+        "postcode": {
+          "type": "string"
+        },
+        "inServiceArea": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "needsHuman": {
+          "type": "boolean"
+        },
+        "nextStep": {
+          "type": "string",
+          "enum": [
+            "book_visit",
+            "book_consultation",
+            "confirm_booking",
+            "reschedule",
+            "reply_with_info",
+            "escalate",
+            "ignore"
+          ]
+        },
+        "missingInfo": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "intent",
+        "urgency",
+        "needsHuman",
+        "nextStep",
+        "missingInfo",
+        "reason"
+      ]
+    }
+  },
+  "maxTokens": 800
+}

@@ -1,0 +1,89 @@
+{
+  "_note": "Starting settings for a flooring business. Price guide figures are EXAMPLES: replace per business.",
+  "useCases": [
+    "answer_enquiries",
+    "book_appointments"
+  ],
+  "settings": {
+    "tone": "Friendly, straightforward and quick. Sounds like the owner texting, not a call centre. Short sentences.",
+    "signOff": "[First name]",
+    "timezone": "Europe/London",
+    "services": [
+      {
+        "name": "Measure-up and quote visit",
+        "durationMinutes": 45,
+        "price": "Free"
+      },
+      {
+        "name": "Fitting job",
+        "durationMinutes": 480
+      }
+    ],
+    "priceGuide": [
+      {
+        "item": "Laminate, fitting only",
+        "range": "£12–£18 per m²"
+      },
+      {
+        "item": "LVT / luxury vinyl tiles or click LVT, fitting only",
+        "range": "£18–£30 per m²"
+      },
+      {
+        "item": "Engineered wood, fitting only",
+        "range": "£22–£35 per m²"
+      },
+      {
+        "item": "Carpet, fitting only",
+        "range": "£6–£10 per m²"
+      },
+      {
+        "item": "Stairs (carpet), fitting only",
+        "range": "£8–£12 per stair"
+      },
+      {
+        "item": "Uplift and disposal of old flooring",
+        "range": "£3–£6 per m²"
+      },
+      {
+        "item": "Latex levelling of subfloor",
+        "range": "£10–£15 per m²"
+      }
+    ],
+    "replyGuidance": "First reply to any new job should do three things in this order: 1) give a rough price range from the price guide for the flooring type they mention, saying it's a guide and the final quote follows a free measure-up; 2) ask for room sizes (or rough dimensions) and a few photos of the current floor if they haven't sent them; 3) offer two or three measure-up times. Keep it short enough to read on a phone.",
+    "replyVia": {
+      "checkatrade": [
+        "checkatrade_message",
+        "whatsapp"
+      ],
+      "email": [
+        "whatsapp",
+        "email"
+      ],
+      "whatsapp": [
+        "whatsapp"
+      ],
+      "web_form": [
+        "whatsapp",
+        "email"
+      ]
+    },
+    "workingHours": {
+      "days": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "start": "08:00",
+      "end": "18:00"
+    },
+    "serviceArea": [],
+    "escalationName": "the owner",
+    "spotCheckEvery": 3,
+    "reviewerPassScore": 4,
+    "checkatradeSenders": [],
+    "retentionDays": 365
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "_note": "Starting settings for a trades business (plumbing, heating). Replace prices per business.",
+  "useCases": [
+    "answer_enquiries",
+    "book_appointments"
+  ],
+  "settings": {
+    "tone": "Friendly, plain-spoken and practical. Short sentences. No jargon. Never pushy.",
+    "signOff": "[First name]",
+    "timezone": "Europe/London",
+    "services": [
+      {
+        "name": "Boiler breakdown visit",
+        "durationMinutes": 90,
+        "price": "£95 call-out including the first hour"
+      },
+      {
+        "name": "Boiler service",
+        "durationMinutes": 60,
+        "price": "£85"
+      },
+      {
+        "name": "Leak or tap repair",
+        "durationMinutes": 60,
+        "price": "£75 for the first hour"
+      },
+      {
+        "name": "Bathroom survey and quote",
+        "durationMinutes": 60,
+        "price": "Free"
+      }
+    ],
+    "replyVia": {
+      "checkatrade": [
+        "checkatrade_message",
+        "whatsapp"
+      ],
+      "email": [
+        "email",
+        "whatsapp"
+      ],
+      "whatsapp": [
+        "whatsapp"
+      ],
+      "web_form": [
+        "email",
+        "whatsapp"
+      ]
+    },
+    "workingHours": {
+      "days": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "start": "08:00",
+      "end": "17:00"
+    },
+    "serviceArea": [],
+    "escalationName": "the owner",
+    "spotCheckEvery": 3,
+    "reviewerPassScore": 4,
+    "checkatradeSenders": [],
+    "retentionDays": 365
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "id": "reviewer",
+  "version": "1.0.0",
+  "model": "claude-opus-5-5",
+  "description": "Independent check of each draft. Scores it and blocks anything unsafe or inaccurate.",
+  "instructions": "You are an independent reviewer. You did not write this draft. Your job is to catch problems before a customer sees them.\n\nBusiness:\n{{tenant}}\n\nRules for this sector:\n{{pack_rules}}\n\nYou receive the customer's message, the triage decision, the proposed slots (if any) and the draft reply.\nScore 1 to 5 on:\n- tone: matches the business's voice and suits the channel.\n- clarity: easy to understand; clear next step for the customer.\n- accuracy: only states facts the business has given; any appointment times exactly match the proposed slots; any price ranges exactly match the business's price guide and are presented as a guide, not a quote; no invented prices or promises.\n- If the business has reply guidance, check the draft follows it.\n- safety: follows every sector rule (emergencies, clinical questions, complaints, liability).\nSet pass to false if any score is below 4 or any sector rule is broken. List each issue in one short sentence. Be strict: a polite reply that breaks a rule fails.\n\nFinish by calling record_review.",
+  "tools": [],
+  "output": {
+    "name": "record_review",
+    "description": "Record the review.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "scores": {
+          "type": "object",
+          "properties": {
+            "tone": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            },
+            "clarity": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            },
+            "accuracy": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            },
+            "safety": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            }
+          },
+          "required": [
+            "tone",
+            "clarity",
+            "accuracy",
+            "safety"
+          ]
+        },
+        "pass": {
+          "type": "boolean"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "scores",
+        "pass",
+        "issues"
+      ]
+    }
+  },
+  "maxTokens": 800
+}

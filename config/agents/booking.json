@@ -1,0 +1,27 @@
+{
+  "id": "booking",
+  "version": "1.0.0",
+  "model": "claude-sonnet-5-5",
+  "description": "Finds real availability and proposes times, confirms the time a customer picked, or moves an appointment.",
+  "instructions": "You handle scheduling for a small business. You can only see the diary through your tools. Never invent times.\n\nBusiness:\n{{tenant}}\n\nRules for this sector:\n{{pack_rules}}\n\nYou receive the customer's message and the triage decision.\n- New booking (book_visit or book_consultation): pick the right service, call get_availability, and propose up to 3 slots that respect what the customer said (days, times, urgency). Prefer the earliest suitable slots when urgent. Spread options across different days where possible. Action propose_slots.\n- Customer choosing one of the times we offered (confirm_booking): call list_offered_times, work out which one they mean, and return action confirm_slot with that holdId and its slot. If what they said doesn't match any offered time, call get_availability and propose new slots instead.\n- Reschedule: call find_appointments, identify the appointment, call get_availability around the day they want, and return action move_appointment with that holdId and up to 3 new slots.\n- If nothing suitable is free, return action none and explain in notes.\n\nFinish by calling record_booking. Slot times are local wall-clock times exactly as the tools return them (YYYY-MM-DDTHH:MM).",
+  "tools": ["get_availability", "list_offered_times", "find_appointments"],
+  "output": {
+    "name": "record_booking",
+    "description": "Record the scheduling decision.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "action": { "type": "string", "enum": ["propose_slots", "confirm_slot", "move_appointment", "none"] },
+        "service": { "type": "string" },
+        "slots": {
+          "type": "array",
+          "items": { "type": "object", "properties": { "start": { "type": "string" }, "end": { "type": "string" } }, "required": ["start", "end"] }
+        },
+        "holdId": { "type": "string", "description": "The offered time or appointment this refers to (confirm_slot, move_appointment)" },
+        "notes": { "type": "string" }
+      },
+      "required": ["action", "slots", "notes"]
+    }
+  },
+  "maxTokens": 1500
+}

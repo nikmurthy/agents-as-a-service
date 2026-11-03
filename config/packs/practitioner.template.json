@@ -1,0 +1,57 @@
+{
+  "_note": "Starting settings for a health practitioner. Health data: shorter retention by default.",
+  "useCases": [
+    "answer_enquiries",
+    "book_appointments"
+  ],
+  "settings": {
+    "tone": "Warm, professional and reassuring. Clear and concise. Evidence-based. British spelling.",
+    "signOff": "[First name]",
+    "timezone": "Europe/London",
+    "services": [
+      {
+        "name": "Initial consultation (online)",
+        "durationMinutes": 60,
+        "price": "See website for current fees"
+      },
+      {
+        "name": "Follow-up consultation (online)",
+        "durationMinutes": 30,
+        "price": "See website for current fees"
+      },
+      {
+        "name": "Corporate wellness discovery call",
+        "durationMinutes": 30,
+        "price": "Free"
+      }
+    ],
+    "replyVia": {
+      "email": [
+        "email"
+      ],
+      "whatsapp": [
+        "whatsapp"
+      ],
+      "web_form": [
+        "email"
+      ]
+    },
+    "workingHours": {
+      "days": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "start": "09:00",
+      "end": "17:00"
+    },
+    "serviceArea": [],
+    "escalationName": "the owner",
+    "spotCheckEvery": 3,
+    "reviewerPassScore": 4,
+    "checkatradeSenders": [],
+    "retentionDays": 180
+  }
+}
