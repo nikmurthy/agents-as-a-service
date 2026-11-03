@@ -7,15 +7,16 @@ import { releaseQueue } from "../jobs/queue.js";
 const HELP = `
 Onboard and manage businesses.
 
-  npm run tenant -- create --slug marks-flooring --name "Mark's Flooring" --pack flooring \\
+  npm run prod:tenant -- create --slug marks-flooring --name "Mark's Flooring" --pack flooring \\
        --owner "Mark Jones" --owner-whatsapp 07700900123 [--owner-email mark@example.com] \\
        [--use-cases answer_enquiries,book_appointments]
-  npm run tenant -- google-link --slug marks-flooring          New link for the owner to connect Gmail + Calendar
-  npm run tenant -- whatsapp --slug marks-flooring --phone-number-id 1234 --token EAAG...
-  npm run tenant -- add-form --slug marks-flooring [--label "Website contact form"]
-  npm run tenant -- add-checkatrade-webhook --slug marks-flooring
-  npm run tenant -- activate --slug marks-flooring             Start handling messages
-  npm run tenant -- show --slug marks-flooring
+  npm run prod:tenant -- google-link --slug marks-flooring          New link for the owner to connect Gmail + Calendar
+  read -s TENANT_WA_TOKEN && export TENANT_WA_TOKEN       (paste the token; kept out of shell history)
+  npm run prod:tenant -- whatsapp --slug marks-flooring --phone-number-id 1234
+  npm run prod:tenant -- add-form --slug marks-flooring [--label "Website contact form"]
+  npm run prod:tenant -- add-checkatrade-webhook --slug marks-flooring
+  npm run prod:tenant -- activate --slug marks-flooring             Start handling messages
+  npm run prod:tenant -- show --slug marks-flooring
 `;
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -42,13 +43,20 @@ Next steps:
 1. Send the owner this link to connect Gmail and Google Calendar (valid 7 days):
    ${r.googleLink}
 2. Ask the owner to send any message to the platform WhatsApp number, so approvals arrive as buttons straight away.
-3. Connect their WhatsApp number:  npm run tenant -- whatsapp --slug ${a.slug} --phone-number-id ... --token ...
+3. Connect their WhatsApp number:  read -s TENANT_WA_TOKEN && export TENANT_WA_TOKEN, then npm run prod:tenant -- whatsapp --slug ${a.slug} --phone-number-id ...
 4. Add website form / Checkatrade webhooks if they have them:  add-form, add-checkatrade-webhook
-5. Check the settings (prices, hours, area) in the tenants table, then:  npm run tenant -- activate --slug ${a.slug}`);
+5. Check the settings (prices, hours, area) in the tenants table, then:  npm run prod:tenant -- activate --slug ${a.slug}`);
       break;
     }
     case "google-link": console.log(googleConnectLink((await tenantBySlug(a.slug!)).id)); break;
-    case "whatsapp": await connectWhatsApp((await tenantBySlug(a.slug!)).id, a["phone-number-id"]!, a.token!); console.log("WhatsApp connected."); break;
+    case "whatsapp": {
+      // Token from the environment so it never appears in shell history or process lists.
+      const token = process.env.TENANT_WA_TOKEN ?? a.token;
+      if (!token) throw new Error("Set TENANT_WA_TOKEN (read -s TENANT_WA_TOKEN && export TENANT_WA_TOKEN) first");
+      await connectWhatsApp((await tenantBySlug(a.slug!)).id, a["phone-number-id"]!, token);
+      console.log("WhatsApp connected. Run: unset TENANT_WA_TOKEN");
+      break;
+    }
     case "add-form": console.log(`Point the website form's webhook at:\n${await addWebhook((await tenantBySlug(a.slug!)).id, "web_form", a.label)}`); break;
     case "add-checkatrade-webhook": console.log(`Give Checkatrade this lead webhook URL:\n${await addWebhook((await tenantBySlug(a.slug!)).id, "checkatrade_webhook")}`); break;
     case "activate": await setTenantStatus((await tenantBySlug(a.slug!)).id, "active"); console.log("Active."); break;

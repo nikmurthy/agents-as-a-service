@@ -1,0 +1,39 @@
+# Applies database migrations and publishes agent definitions to PRODUCTION.
+# Runs only when started by hand (Actions tab → "Migrate production" → Run workflow), and only after
+# approval if the "production" environment has required reviewers set (Settings → Environments).
+# Secrets come from Bitwarden Secrets Manager at run time; nothing production-related is stored in GitHub
+# except the Bitwarden access token for a machine account that can read only the production project.
+name: Migrate production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Get production secrets from Bitwarden
+        uses: bitwarden/sm-action@v2
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          # For a Bitwarden EU account, uncomment:
+          # base_url: https://vault.bitwarden.eu
+          secrets: |
+            ${{ vars.BW_SECRET_ID_DATABASE_URL }} > DATABASE_URL
+            ${{ vars.BW_SECRET_ID_DATA_ENCRYPTION_KEY }} > DATA_ENCRYPTION_KEY
+            ${{ vars.BW_SECRET_ID_SIGNING_SECRET }} > SIGNING_SECRET
+
+      - run: npm ci
+      - run: npm run migrate
+      - run: npm run agents:sync

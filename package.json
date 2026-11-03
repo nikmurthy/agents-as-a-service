@@ -10,7 +10,11 @@
     "tenant": "tsx src/cli/tenant.ts",
     "data": "tsx src/cli/data.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts"
+    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts",
+    "prod:migrate": "bws run --project-id \"$BWS_PROJECT_ID\" -- npm run migrate",
+    "prod:agents:sync": "bws run --project-id \"$BWS_PROJECT_ID\" -- npm run agents:sync",
+    "prod:tenant": "bws run --project-id \"$BWS_PROJECT_ID\" -- tsx src/cli/tenant.ts",
+    "prod:data": "bws run --project-id \"$BWS_PROJECT_ID\" -- tsx src/cli/data.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",

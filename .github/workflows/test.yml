@@ -1,0 +1,36 @@
+# Type-checks and runs the end-to-end tests on every push and pull request,
+# against a throwaway Postgres inside GitHub's runner. No real secrets involved.
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: platform_test
+          POSTGRES_PASSWORD: platform_test
+          POSTGRES_DB: platform_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U platform_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://platform_test:platform_test@localhost:5432/platform_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
