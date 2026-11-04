@@ -23,6 +23,43 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Checks the GitHub settings before talking to Bitwarden. Never prints values, only whether each
+      # setting is present and shaped like a Bitwarden secret ID.
+      - name: Check GitHub settings
+        env:
+          ID_DATABASE_URL: ${{ vars.BW_SECRET_ID_DATABASE_URL }}
+          ID_DATA_ENCRYPTION_KEY: ${{ vars.BW_SECRET_ID_DATA_ENCRYPTION_KEY }}
+          ID_SIGNING_SECRET: ${{ vars.BW_SECRET_ID_SIGNING_SECRET }}
+          HAS_TOKEN: ${{ secrets.BW_ACCESS_TOKEN != '' }}
+          # Same names set as secrets by mistake (they should be variables):
+          SECRET_DATABASE_URL_SET: ${{ secrets.BW_SECRET_ID_DATABASE_URL != '' }}
+          SECRET_DATA_ENCRYPTION_KEY_SET: ${{ secrets.BW_SECRET_ID_DATA_ENCRYPTION_KEY != '' }}
+          SECRET_SIGNING_SECRET_SET: ${{ secrets.BW_SECRET_ID_SIGNING_SECRET != '' }}
+        run: |
+          ok=1
+          guid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          check() { # name, value, set-as-secret
+            v="$(printf '%s' "$2" | tr -d '[:space:]')"
+            if [ -z "$v" ]; then
+              if [ "$3" = "true" ]; then
+                echo "::error::$1 is saved as a SECRET. It must be an Environment VARIABLE (Settings → Environments → production → Environment variables)."
+              else
+                echo "::error::$1 is missing. Add it under Settings → Environments → production → Environment variables, named exactly $1."
+              fi
+              ok=0
+            elif printf '%s' "$v" | grep -Eq "$guid"; then
+              echo "✓ $1 looks like a Bitwarden secret ID"
+            else
+              echo "::error::$1 is set but isn't a Bitwarden secret ID (${#v} characters; an ID is 36, like 3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c). If it holds the secret's actual value, delete it and replace it with the ID."
+              ok=0
+            fi
+          }
+          check BW_SECRET_ID_DATABASE_URL "$ID_DATABASE_URL" "$SECRET_DATABASE_URL_SET"
+          check BW_SECRET_ID_DATA_ENCRYPTION_KEY "$ID_DATA_ENCRYPTION_KEY" "$SECRET_DATA_ENCRYPTION_KEY_SET"
+          check BW_SECRET_ID_SIGNING_SECRET "$ID_SIGNING_SECRET" "$SECRET_SIGNING_SECRET_SET"
+          if [ "$HAS_TOKEN" = "true" ]; then echo "✓ BW_ACCESS_TOKEN is set"; else echo "::error::BW_ACCESS_TOKEN is missing. Add it under Settings → Environments → production → Environment secrets."; ok=0; fi
+          [ "$ok" = 1 ] || exit 1
+
       - name: Get production secrets from Bitwarden
         uses: bitwarden/sm-action@v2
         with:
