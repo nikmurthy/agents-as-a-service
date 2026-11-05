@@ -163,3 +163,81 @@ The tests wipe that database. They run the whole journey against real Postgres, 
 - **WhatsApp for each business.** Connecting a business's own number is done by hand for now (phone number id + token). For scale, become a Meta Tech Provider and add Embedded Signup. WhatsApp replies to customers only go out within 24 hours of their last message; after that the owner is told to reply directly.
 - **Checkatrade.** There's no reply API, so the owner pastes Checkatrade replies themselves. The lead webhook is only for strategic accounts. Most leads arrive by email, which is covered.
 - **Not built yet:** Outlook, Instagram and Facebook DMs, SMS, a web dashboard (Supabase logins are already allowed for in the security rules), self-serve sign-up, billing, and auto-send without approval.
+
+## Next build
+
+Work through these in order. Each phase should leave `npm run typecheck` and `npm test` passing, and follow `CLAUDE.md`.
+
+### Phase 0: get production running
+
+1. **Migrate production goes green.** Run the *Migrate production* workflow and fix whatever the *Check GitHub settings* step reports. Then confirm the tables exist in Supabase.
+2. **Deploy the server and worker** to a UK or EU host (Fly.io London preferred), with secrets from Bitwarden or the host's encrypted settings. `/health` should respond on the public URL.
+3. **Onboard The Health Nutritionist** as the first business and test the full loop on a real inbox.
+
+### Phase 1: admin web app (the main next piece)
+
+A web app where the platform admin (Charlotte) and each business owner can see and manage settings, instead of using the command line and the Supabase table editor.
+
+**Users and roles**
+- **Platform admin:** sees every business. Creates, pauses and activates businesses. Manages templates and agent versions, and handles data requests.
+- **Business owner / staff:** sees only their own business. Owners can change settings and connections; staff can view and approve.
+- **Sign-in:** Supabase Auth (email magic link plus Google sign-in), with two-factor required for platform admins.
+- **Linking people to businesses:** `tenant_members.user_id` already links a login to a business, and the `member_read` policies in the migration already allow members to read their own business's rows.
+- **Platform admins:** a new `platform_admins` table (user_id). Never give the browser the service-role key.
+
+**Screens**
+1. **Businesses** (admin only): a list with status, pack, last message received, drafts waiting, and connection problems. Includes a **New business** form, which replaces `npm run tenant -- create`.
+2. **Business overview:** status (onboarding / active / paused, with buttons to change it), today's numbers, and anything needing attention: failed sends, broken connections, ⚠️ drafts.
+3. **Settings:** an editable form for `tenants.settings`:
+   - name, tone, sign-off and reply guidance;
+   - services (name, duration, price) and price guide (item, range);
+   - working days and hours, service area (postcode districts) and timezone;
+   - reply routes per channel (ordered list);
+   - spot-check rate, reviewer pass score and retention days;
+   - Checkatrade sender addresses.
+
+   Validate on the server with one shared schema, using zod for both the form and the API. Save a copy of the old version in the audit log for every change.
+4. **Use cases:** switch Answer enquiries and Book appointments on and off (`tenant_use_cases`).
+5. **Connections:**
+   - Google: status and account, with **Connect / Reconnect**, using the existing `/connect/google` link.
+   - WhatsApp number: status, plus a form to add the phone number ID and token. The token is posted once, encrypted on the server, and never shown again.
+   - Website form and Checkatrade webhooks: create, show the URL with a copy button, and disable.
+   - The last error shown for each.
+6. **People:** owners, staff and approvers, with their WhatsApp numbers, the approver flag, and invites by email.
+7. **Inbox:** conversations with the full thread, each draft (original vs edited), its review scores and status. **Approve / Edit / Reject buttons that do exactly what the WhatsApp buttons do.** Reuse the same decision function so the two can never disagree.
+8. **Bookings:** held and confirmed appointments, with cancel and release.
+9. **Activity:** runs (outcome, reason, agents and versions used, tokens) and the audit log, filterable.
+10. **Data requests** (admin, plus owner for their own business): export, erase and suppress a person (`src/data-rights.ts`), each needing a typed confirmation.
+11. **Agents** (admin only): published agent versions and which version each business is pinned to. Read-only to begin with.
+
+**How to build it**
+- **Same repository:** `apps/admin` as a Next.js (App Router) app or Vite + React. Move shared code (types, settings schema, db helpers) into `packages/core`, or import it from `src/`.
+- **Every read and write goes through the server** using `withTenant(tenantId)`, after checking the signed-in user is a member of that business, or a platform admin. Row-level security stays the backstop. Business-scoped pages must not use `withAdmin`.
+- **Secrets are write-only:** tokens can be replaced but never read back to the browser. Show "connected as …" and the date instead.
+- **Every change goes in the audit log,** with who made it and what changed. Exclude secrets and message text.
+- **Hosting:** the same host and region as the server, with its own URL (e.g. `admin.<domain>`), HTTPS only, secure cookies and CSRF protection on forms.
+- **Design:** simple, works on a phone (owners will use it on site), clear status colours, no jargon. Use British English.
+
+**Tests to add**
+- An owner of business A can't see or change business B: page, API and database.
+- Staff can't change settings; owners can; platform admins can see all businesses.
+- Approving in the web app and on WhatsApp produces the same result, and double approval doesn't send twice.
+- Saving invalid settings (e.g. working hours end before they start) is rejected with a clear message.
+- A replaced WhatsApp token is stored encrypted and never returned by any API.
+
+**Done when:** a new business can be created, configured, connected and activated entirely from the web app. The owner can log in and manage their own settings and drafts.
+
+### Phase 2: next skills for trades (the floor layer)
+
+- **A standard skill format:** trigger (message, schedule or event such as a job booked), agents, permitted tools, approval rule. New use cases then become configuration plus a small workflow.
+- **Chase quotes:** if a quoted customer hasn't replied after N days, draft a follow-up for approval.
+- **Order materials for a job:** when a job is confirmed, draft the supplier order for delivery the day before, add it to the diary, and send for approval.
+- **Ask for reviews:** after the job, send a Google or Checkatrade review request.
+
+### Phase 3: before more customers
+
+- **Google app verification** (restricted Gmail scope, annual security assessment). Start early, it takes weeks.
+- **Meta Tech Provider status and WhatsApp Embedded Signup,** so owners connect their own number from the web app.
+- **Billing** (Stripe) per business, and **self-serve sign-up** using the web app's onboarding.
+- **Separate development and production** Supabase projects, plus database network restrictions to the app host.
+- **Data processing agreement, privacy notice** and a DPIA for the practitioner pack.
