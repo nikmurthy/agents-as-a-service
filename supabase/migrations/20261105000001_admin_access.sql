@@ -21,3 +21,8 @@ create index tenant_members_user on tenant_members (user_id) where user_id is no
 grant update (name, settings) on tenants to app_tenant;
 create policy tenant_self_update on tenants for update to app_tenant
   using (id = app_current_tenant()) with check (id = app_current_tenant());
+
+-- People are invited by email: one person per address per business, and a quick way to find who an address belongs to
+-- when they first sign in.
+create unique index tenant_members_tenant_email on tenant_members (tenant_id, lower(email)) where email is not null;
+create index tenant_members_email_unclaimed on tenant_members (lower(email)) where user_id is null and email is not null;

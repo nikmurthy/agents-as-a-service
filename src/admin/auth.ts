@@ -17,7 +17,7 @@ export interface Caller {
 let jwks: JWTVerifyGetKey | undefined;
 
 /** The user id and claims of a valid Supabase access token, or undefined. */
-export async function verifyAccessToken(token: string): Promise<{ userId: string; email: string | null; mfa: boolean } | undefined> {
+export async function verifyAccessToken(token: string): Promise<{ userId: string; email: string | null; emailVerified: boolean; mfa: boolean } | undefined> {
   try {
     const secret = env.supabaseJwtSecret;
     const url = env.supabaseUrl.replace(/\/$/, "");
@@ -31,7 +31,8 @@ export async function verifyAccessToken(token: string): Promise<{ userId: string
       ({ payload } = await jwtVerify(token, jwks, { ...opts, algorithms: ["ES256", "RS256"] }));
     }
     if (!payload.sub || payload.role !== "authenticated") return undefined;
-    return { userId: payload.sub, email: typeof payload.email === "string" ? payload.email : null, mfa: payload.aal === "aal2" };
+    const verified = (payload.user_metadata as { email_verified?: unknown } | undefined)?.email_verified === true;
+    return { userId: payload.sub, email: typeof payload.email === "string" ? payload.email : null, emailVerified: verified, mfa: payload.aal === "aal2" };
   } catch {
     return undefined;
   }
@@ -42,12 +43,21 @@ export async function loadCaller(token: string): Promise<Caller | undefined> {
   const v = await verifyAccessToken(token);
   if (!v) return undefined;
   // Cross-business lookup by user id: this is the one place that has to see across businesses, so it is kept small.
-  const { admin, memberships } = await withAdmin(async (db) => ({
-    admin: await one(db, "select 1 from platform_admins where user_id = $1", [v.userId]),
-    memberships: await many<Membership>(db,
-      `select t.id as "tenantId", m.id as "memberId", m.role, t.name, t.slug
+  const { admin, memberships } = await withAdmin(async (db) => {
+    // First sign-in after an invite: attach this login to the people who were added with the same, verified, email address.
+    // Never done for an unverified address, and never for a person who already has a login.
+    if (v.email && v.emailVerified) {
+      await db.query(
+        `update tenant_members m set user_id = $1 where m.user_id is null and lower(m.email) = lower($2)
+         and not exists (select 1 from tenant_members o where o.tenant_id = m.tenant_id and o.user_id = $1)`, [v.userId, v.email]);
+    }
+    return {
+      admin: await one(db, "select 1 from platform_admins where user_id = $1", [v.userId]),
+      memberships: await many<Membership>(db,
+        `select t.id as "tenantId", m.id as "memberId", m.role, t.name, t.slug
        from tenant_members m join tenants t on t.id = m.tenant_id
        where m.user_id = $1 and t.status <> 'closed' order by t.name`, [v.userId]),
-  }));
-  return { ...v, isPlatformAdmin: !!admin, memberships };
+    };
+  });
+  return { userId: v.userId, email: v.email, mfa: v.mfa, isPlatformAdmin: !!admin, memberships };
 }

@@ -165,8 +165,10 @@ The tests wipe that database. They run the whole journey against real Postgres, 
 - **Settings** are checked by one shared schema (`src/admin/settings-schema.ts`); every save keeps the old version in the audit log.
 - **Approvals** on the web and on WhatsApp share `src/decisions.ts`, so they behave identically (double-decide safe, slots released on reject).
 - **Secrets are write-only.** Tokens are never returned. Webhook addresses are shown to owners only.
-- **Endpoints:** `GET /me`; `GET/POST /businesses`; `POST /businesses/:id/status`; `GET /businesses/:id`; `GET/PUT /businesses/:id/settings`; `PUT /businesses/:id/use-cases/:useCase`; `GET /businesses/:id/drafts`; `POST /businesses/:id/drafts/:draftId/{approve,reject,edit}`; `GET /businesses/:id/connections`; `POST .../connections/{whatsapp,webhook}`; `POST .../connections/:connId/disable`; `GET .../google-link`.
-- **Add the first admin** after they have signed in once: `insert into platform_admins (user_id, email) values ('<auth user id>', '<email>');`, and link owners with `update tenant_members set user_id = '<auth user id>' where id = '<member id>';`.
+- **Endpoints:** `GET /me`; `GET/POST /businesses`; `POST /businesses/:id/status`; `GET /businesses/:id`; `GET/PUT /businesses/:id/settings`; `PUT /businesses/:id/use-cases/:useCase`; `GET /businesses/:id/drafts`; `POST /businesses/:id/drafts/:draftId/{approve,reject,edit}`; `GET /businesses/:id/connections`; `POST .../connections/{whatsapp,webhook}`; `POST .../connections/:connId/disable`; `GET .../google-link`; `GET/POST /businesses/:id/people`, `PUT/DELETE .../people/:memberId`; `GET .../conversations[/:convId]`; `GET .../bookings`, `POST .../bookings/:holdId/cancel`; `GET .../runs[/:runId]`, `GET .../audit`; `POST .../data/{export,erase,suppress}`, `GET .../data/requests`; `GET /agents` (platform admin).
+- **People** are invited by adding their email address. The first time they sign in with that address, and Supabase says it's verified, their login is linked automatically (only if the person has no login yet). The last owner can't be removed or demoted.
+- **Agent version pins** (`settings.agentVersions`) are set by the platform: hidden from the settings form and kept when owners save.
+- **Add the first admin** after they have signed in once: `insert into platform_admins (user_id, email) values ('<auth user id>', '<email>');`. Owners are linked on first sign-in if added with the same email address (see *People*).
 
 ## Limits to know before the first customers
 
@@ -187,7 +189,7 @@ Work through these in order. Each phase should leave `npm run typecheck` and `np
 
 ### Phase 1: admin web app (the main next piece)
 
-**Status:** the backend is built (see *Admin API* below): sign-in checks, businesses, overview, settings, use cases, inbox with approve/edit/reject, and connections. Still to do: the screens themselves, then Bookings, Activity, People, Data requests and Agents endpoints.
+**Status:** the whole backend is built (see *Admin API*): every screen below has its endpoints. Still to do: the screens themselves (`apps/admin`).
 
 A web app where the platform admin (Charlotte) and each business owner can see and manage settings, instead of using the command line and the Supabase table editor.
 

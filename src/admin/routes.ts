@@ -7,20 +7,21 @@ import { audit } from "../audit.js";
 import { addWebhook, connectWhatsApp, createTenant, packTemplate, setTenantStatus } from "../onboarding.js";
 import { googleConnectLink } from "../connections.js";
 import { decideDraft, type Decision, type DecisionActor } from "../decisions.js";
-import { loadCaller, type Caller } from "./auth.js";
+import { loadCaller } from "./auth.js";
+import { guard, guardAdmin, body, UUID, type Vars } from "./access.js";
+import { moreApi } from "./routes-more.js";
 import { formatIssues, settingsSchema } from "./settings-schema.js";
 
 // The admin web app's API. Every route authenticates the caller, then checks they may act on that business.
 // Business-scoped routes only ever use withTenant (row-level security stays the backstop); the few platform-wide
 // routes are admin-only. Secrets are write-only: nothing here returns a token.
 
-type Vars = { Variables: { caller: Caller } };
 export const adminApi = new Hono<Vars>();
 
 adminApi.use("*", cors({
   origin: (origin) => (env.adminOrigin && origin === env.adminOrigin ? origin : null),
   allowHeaders: ["authorization", "content-type"],
-  allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
+  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   maxAge: 600,
 }));
 
@@ -33,42 +34,7 @@ adminApi.use("*", async (c, next) => {
   await next();
 });
 
-// ---------------------------------------------------------------- access checks
-/** view: see the business. approve: also decide drafts. manage: change settings and connections (owners and admins). */
-type Level = "view" | "approve" | "manage";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-type Granted = { ok: true; tenantId: string; actor: DecisionActor; manage: boolean } | { ok: false; res: Response };
-
-function mfaRequired(c: Context) { return c.json({ error: "mfa_required", message: "Platform admins must sign in with a second factor." }, 403); }
-
-function guard(c: Context<Vars>, tenantId: string, level: Level): Granted {
-  const caller = c.get("caller");
-  const notFound = { ok: false as const, res: c.json({ error: "not_found" }, 404) };
-  if (!UUID.test(tenantId)) return notFound;
-  const m = caller.memberships.find((x) => x.tenantId === tenantId);
-  if (caller.isPlatformAdmin) {
-    if (!caller.mfa) return { ok: false, res: mfaRequired(c) };
-    return { ok: true, tenantId, manage: true, actor: { memberId: m?.memberId ?? null, label: `admin:${caller.email ?? caller.userId}`, via: "web" } };
-  }
-  if (!m) return notFound; // someone else's business looks the same as one that doesn't exist
-  if (level === "manage" && m.role !== "owner") return { ok: false, res: c.json({ error: "forbidden", message: "Only the owner can change this." }, 403) };
-  return { ok: true, tenantId, manage: m.role === "owner", actor: { memberId: m.memberId, label: `member:${m.memberId}`, via: "web" } };
-}
-
-function guardAdmin(c: Context<Vars>): { ok: true; label: string } | { ok: false; res: Response } {
-  const caller = c.get("caller");
-  if (!caller.isPlatformAdmin) return { ok: false, res: c.json({ error: "forbidden" }, 403) };
-  if (!caller.mfa) return { ok: false, res: mfaRequired(c) };
-  return { ok: true, label: `admin:${caller.email ?? caller.userId}` };
-}
-
-async function body<T extends z.ZodType>(c: Context, schema: T): Promise<{ ok: true; data: z.infer<T> } | { ok: false; res: Response }> {
-  const raw = await c.req.json().catch(() => undefined);
-  const r = schema.safeParse(raw);
-  if (r.success) return { ok: true, data: r.data };
-  return { ok: false, res: c.json({ error: "invalid", issues: formatIssues(r.error) }, 422) };
-}
+adminApi.route("/", moreApi);
 
 // ---------------------------------------------------------------- who am I
 adminApi.get("/me", (c) => {
@@ -158,6 +124,7 @@ adminApi.get("/businesses/:id", async (c) => {
 });
 
 // ---------------------------------------------------------------- settings
+const withoutPinned = (s: any) => { const { agentVersions: _drop, ...rest } = s ?? {}; return rest; };
 /** JSON with sorted keys, so Postgres's key order doesn't count as a change. */
 const canon = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x));
 const putSettings = z.object({ name: z.string().trim().min(1, "Name is required").max(100).optional(), settings: settingsSchema }).strict();
@@ -166,7 +133,7 @@ adminApi.get("/businesses/:id/settings", async (c) => {
   const g = guard(c, c.req.param("id"), "view");
   if (!g.ok) return g.res;
   const t = await withTenant(g.tenantId, (db) => one(db, "select name, settings from tenants where id = app_current_tenant()"));
-  return t ? c.json({ name: t.name, settings: t.settings, canEdit: g.manage }) : c.json({ error: "not_found" }, 404);
+  return t ? c.json({ name: t.name, settings: withoutPinned(t.settings), canEdit: g.manage }) : c.json({ error: "not_found" }, 404);
 });
 
 adminApi.put("/businesses/:id/settings", async (c) => {
@@ -178,12 +145,15 @@ adminApi.put("/businesses/:id/settings", async (c) => {
     const before = await one(db, "select name, settings from tenants where id = app_current_tenant() for update");
     if (!before) return false;
     const name = b.data.name ?? before.name;
-    await db.query("update tenants set name = $1, settings = $2 where id = app_current_tenant()", [name, b.data.settings]);
+    // Agent version pins are set by the platform, not in the form, so they are carried over untouched.
+    const pinned = (before.settings as any)?.agentVersions;
+    await db.query("update tenants set name = $1, settings = $2 where id = app_current_tenant()", [name, pinned ? { ...b.data.settings, agentVersions: pinned } : b.data.settings]);
     // The old version goes in the audit log so any change can be undone. Settings hold no customer message text.
-    const changed = Object.keys(b.data.settings).filter((k) => canon((before.settings as any)?.[k]) !== canon((b.data.settings as any)[k]));
+    const prev = withoutPinned(before.settings);
+    const changed = Object.keys(b.data.settings).filter((k) => canon((prev as any)?.[k]) !== canon((b.data.settings as any)[k]));
     await audit(db, {
       tenantId: g.tenantId, actor: g.actor.label, action: "settings.updated", entity: "tenant", entityId: g.tenantId,
-      detail: { changed, previousName: before.name === name ? undefined : before.name, previous: before.settings },
+      detail: { changed, previousName: before.name === name ? undefined : before.name, previous: prev },
     });
     return true;
   });

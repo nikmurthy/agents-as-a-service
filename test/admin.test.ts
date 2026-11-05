@@ -48,9 +48,9 @@ async function postWhatsApp(body: unknown) {
 }
 
 const secret = new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET);
-async function token(userId: string, opts: { aal?: "aal1" | "aal2"; email?: string; role?: string; expired?: boolean; key?: Uint8Array } = {}) {
+async function token(userId: string, opts: { aal?: "aal1" | "aal2"; email?: string; verified?: boolean; role?: string; expired?: boolean; key?: Uint8Array } = {}) {
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({ role: opts.role ?? "authenticated", aal: opts.aal ?? "aal1", email: opts.email ?? `${userId}@example.com` })
+  return new SignJWT({ role: opts.role ?? "authenticated", aal: opts.aal ?? "aal1", email: opts.email ?? `${userId}@example.com`, user_metadata: { email_verified: opts.verified ?? false } })
     .setProtectedHeader({ alg: "HS256" }).setSubject(userId).setAudience("authenticated")
     .setIssuedAt(now - 100).setExpirationTime(opts.expired ? now - 10 : now + 3600).sign(opts.key ?? secret);
 }
@@ -354,4 +354,180 @@ test("overview counts what the business needs to know about", async () => {
   assert.ok(o.body.useCases.length > 0);
   const closed = await withTenant(B, (db) => one(db, "select count(*)::int as n from messages"));
   assert.equal(closed.n, 0, "none of A's traffic shows up for B");
+});
+
+// ---------------------------------------------------------------- people
+test("people: owners manage the team, staff can only look, and the last owner can't be removed", async () => {
+  assert.equal((await api("GET", `/businesses/${A}/people`, tStaffA)).body.canEdit, false);
+  assert.equal((await api("POST", `/businesses/${A}/people`, tStaffA, { name: "X" })).status, 403);
+  assert.equal((await api("GET", `/businesses/${A}/people`, tOwnerB)).status, 404);
+
+  assert.equal((await api("POST", `/businesses/${A}/people`, tOwnerA, { name: "", role: "staff" })).status, 422);
+  const noNumber = await api("POST", `/businesses/${A}/people`, tOwnerA, { name: "Tom", isApprover: true });
+  assert.equal(noNumber.status, 422);
+  assert.equal(noNumber.body.issues[0].path, "whatsapp");
+
+  const add = await api("POST", `/businesses/${A}/people`, tOwnerA, { name: "Tom", email: "Tom@Example.com", whatsapp: "07700 900044", isApprover: true });
+  assert.equal(add.status, 201);
+  const dup = await api("POST", `/businesses/${A}/people`, tOwnerA, { name: "Tom again", email: "tom@example.com" });
+  assert.equal(dup.status, 409);
+
+  const list = await api("GET", `/businesses/${A}/people`, tOwnerA);
+  const tom = list.body.people.find((p: any) => p.id === add.body.id);
+  assert.equal(tom.email, "tom@example.com");
+  assert.equal(tom.whatsapp, "+447700900044");
+  assert.equal(tom.hasLogin, false);
+
+  assert.equal((await api("PUT", `/businesses/${A}/people/${add.body.id}`, tOwnerA, { whatsapp: null })).status, 422, "an approver keeps a number");
+  assert.equal((await api("PUT", `/businesses/${A}/people/${add.body.id}`, tOwnerA, { isApprover: false, whatsapp: null, name: "Tom B" })).status, 200);
+  assert.equal((await api("PUT", `/businesses/${A}/people/${randomUUID()}`, tOwnerA, { name: "Nobody" })).status, 404);
+  assert.equal((await api("PUT", `/businesses/${B}/people/${add.body.id}`, tOwnerB, { name: "Hijack" })).status, 404, "can't reach another business's people");
+
+  const ownerId = list.body.people.find((p: any) => p.role === "owner").id;
+  assert.equal((await api("PUT", `/businesses/${A}/people/${ownerId}`, tOwnerA, { role: "staff" })).status, 409);
+  assert.equal((await api("DELETE", `/businesses/${A}/people/${ownerId}`, tOwnerA)).status, 409);
+
+  assert.equal((await api("DELETE", `/businesses/${A}/people/${add.body.id}`, tOwnerA)).status, 200);
+  assert.equal((await api("DELETE", `/businesses/${A}/people/${add.body.id}`, tOwnerA)).status, 404);
+  const actions = await withTenant(A, (db) => many(db, "select action, detail from audit_log where action like 'member.%'"));
+  assert.deepEqual([...new Set(actions.map((a: any) => a.action))].sort(), ["member.added", "member.removed", "member.updated"]);
+  assert.ok(!JSON.stringify(actions).includes("900044") && !JSON.stringify(actions).includes("tom@"), "no contact details in the audit log");
+});
+
+test("an invited person is linked to their login only when their email address is verified", async () => {
+  const add = await api("POST", `/businesses/${A}/people`, tOwnerA, { name: "Priya", email: "priya@example.com" });
+  assert.equal(add.status, 201);
+  const priya = randomUUID();
+  const unverified = await api("GET", "/me", await token(priya, { email: "priya@example.com", verified: false }));
+  assert.deepEqual(unverified.body.businesses, [], "an unverified address proves nothing");
+  const verified = await api("GET", "/me", await token(priya, { email: "Priya@Example.com", verified: true }));
+  assert.deepEqual(verified.body.businesses.map((b: any) => b.tenantId), [A]);
+  assert.equal(verified.body.businesses[0].role, "staff");
+  const other = randomUUID();
+  const thief = await api("GET", "/me", await token(other, { email: "priya@example.com", verified: true }));
+  assert.deepEqual(thief.body.businesses, [], "once linked, a second login can't take the place");
+  assert.equal((await api("GET", `/businesses/${A}/people`, await token(priya, { email: "priya@example.com", verified: true }))).body.people.find((p: any) => p.name === "Priya").hasLogin, true);
+});
+
+test("settings saves keep the platform's agent version pins, and the pins aren't shown to owners", async () => {
+  await withAdmin((db) => db.query("update tenants set settings = settings || '{\"agentVersions\": {\"drafting\": \"1.0.0\"}}'::jsonb where id = $1", [A]));
+  const read = await api("GET", `/businesses/${A}/settings`, tOwnerA);
+  assert.equal(read.body.settings.agentVersions, undefined);
+  assert.equal((await api("PUT", `/businesses/${A}/settings`, tOwnerA, { settings: { ...read.body.settings, signOff: "Cheers, Mark" } })).status, 200);
+  assert.equal((await api("PUT", `/businesses/${A}/settings`, tOwnerA, { settings: { ...read.body.settings, agentVersions: { drafting: "9.9.9" } } })).status, 422, "owners can't set pins");
+  const stored = await withTenant(A, (db) => one(db, "select settings from tenants where id = app_current_tenant()"));
+  assert.deepEqual(stored.settings.agentVersions, { drafting: "1.0.0" });
+  assert.equal(stored.settings.signOff, "Cheers, Mark");
+  await withAdmin((db) => db.query("update tenants set settings = settings - 'agentVersions' where id = $1", [A]));
+});
+
+// ---------------------------------------------------------------- inbox, bookings, activity
+test("conversations: list and detail show messages, drafts (original vs edited) and bookings, per business", async () => {
+  const list = await api("GET", `/businesses/${A}/conversations`, tStaffA);
+  assert.equal(list.status, 200);
+  assert.ok(list.body.conversations.length >= 4);
+  assert.equal((await api("GET", `/businesses/${B}/conversations`, tOwnerB)).body.conversations.length, 0);
+  assert.equal((await api("GET", `/businesses/${A}/conversations`, tOwnerB)).status, 404);
+  assert.equal((await api("GET", `/businesses/${A}/conversations?limit=2`, tStaffA)).body.conversations.length, 2);
+
+  const edited = await withTenant(A, (db) => one(db, "select conversation_id from drafts where body <> original_body limit 1"));
+  const detail = await api("GET", `/businesses/${A}/conversations/${edited.conversation_id}`, tStaffA);
+  assert.equal(detail.status, 200);
+  assert.ok(detail.body.messages.some((m: any) => m.direction === "in"));
+  const d = detail.body.drafts.find((x: any) => x.edited);
+  assert.ok(d && d.originalBody !== d.body, "shows what the agent wrote and what was sent");
+  assert.equal((await api("GET", `/businesses/${B}/conversations/${edited.conversation_id}`, tOwnerB)).status, 404);
+  assert.equal((await api("GET", `/businesses/${A}/conversations/nope`, tOwnerA)).status, 404);
+});
+
+test("bookings: staff can see and cancel; closed ones can't be cancelled again", async () => {
+  const conv = await withTenant(A, (db) => one(db, "select id, contact_id from conversations limit 1"));
+  const mk = (status: string, hours: number) => withTenant(A, async (db) => (await one(db,
+    "insert into holds (tenant_id, conversation_id, contact_id, service, start_at, end_at, status) values (app_current_tenant(), $1, $2, 'Survey', now() + $3 * interval '1 hour', now() + ($3 + 1) * interval '1 hour', $4) returning id",
+    [conv.id, conv.contact_id, hours, status]))!.id);
+  const held = await mk("held", 24), confirmed = await mk("confirmed", 48), released = await mk("released", 72);
+  const list = await api("GET", `/businesses/${A}/bookings`, tStaffA);
+  const ids = list.body.bookings.map((b: any) => b.id);
+  assert.ok(ids.includes(held) && ids.includes(confirmed) && !ids.includes(released), "by default only live bookings");
+  assert.ok((await api("GET", `/businesses/${A}/bookings?status=released`, tStaffA)).body.bookings.some((b: any) => b.id === released));
+  assert.equal((await api("GET", `/businesses/${A}/bookings?status=bogus`, tStaffA)).status, 422);
+  assert.equal((await api("GET", `/businesses/${B}/bookings`, tOwnerB)).body.bookings.length, 0);
+
+  assert.equal((await api("POST", `/businesses/${A}/bookings/${held}/cancel`, tStranger)).status, 404);
+  assert.equal((await api("POST", `/businesses/${B}/bookings/${held}/cancel`, tOwnerB)).status, 404);
+  assert.equal((await api("POST", `/businesses/${A}/bookings/${held}/cancel`, tStaffA)).status, 200);
+  assert.equal((await api("POST", `/businesses/${A}/bookings/${confirmed}/cancel`, tOwnerA)).status, 200);
+  const again = await api("POST", `/businesses/${A}/bookings/${held}/cancel`, tOwnerA);
+  assert.equal(again.status, 409);
+  assert.equal(again.body.status, "released");
+  const st = await withTenant(A, (db) => many(db, "select id, status from holds where id = any($1)", [[held, confirmed]]));
+  assert.deepEqual(Object.fromEntries(st.map((h: any) => [h.id, h.status])), { [held]: "released", [confirmed]: "cancelled" });
+  assert.ok((await withTenant(A, (db) => many(db, "select 1 from audit_log where action in ('booking.cancelled', 'hold.released') and detail->>'via' = 'web'"))).length >= 2);
+});
+
+test("activity: runs with their steps, and the audit trail with filters and paging", async () => {
+  const runs = await api("GET", `/businesses/${A}/runs`, tStaffA);
+  assert.equal(runs.status, 200);
+  assert.ok(runs.body.runs.length > 0);
+  const withSteps = runs.body.runs.find((r: any) => r.agents.length > 0);
+  assert.ok(withSteps, "each run lists the agent versions that handled it");
+  const one1 = await api("GET", `/businesses/${A}/runs/${withSteps.id}`, tStaffA);
+  assert.equal(one1.status, 200);
+  assert.ok(one1.body.events.length > 0);
+  assert.equal((await api("GET", `/businesses/${B}/runs/${withSteps.id}`, tOwnerB)).status, 404);
+  assert.equal((await api("GET", `/businesses/${B}/runs`, tOwnerB)).body.runs.length, 0);
+
+  const all = await api("GET", `/businesses/${A}/audit?limit=3`, tStaffA);
+  assert.equal(all.body.entries.length, 3);
+  const older = await api("GET", `/businesses/${A}/audit?limit=3&before=${encodeURIComponent(all.body.entries[2].at)}`, tStaffA);
+  assert.ok(older.body.entries.every((e: any) => new Date(e.at) < new Date(all.body.entries[2].at)));
+  const drafts = await api("GET", `/businesses/${A}/audit?action=draft`, tStaffA);
+  assert.ok(drafts.body.entries.length > 0 && drafts.body.entries.every((e: any) => e.action.startsWith("draft.")));
+  assert.equal((await api("GET", `/businesses/${A}/audit?action=%27%3B--`, tStaffA)).status, 422);
+  assert.ok((await api("GET", `/businesses/${B}/audit`, tOwnerB)).body.entries.every((e: any) => !JSON.stringify(e).includes(A)));
+});
+
+// ---------------------------------------------------------------- data requests and agents
+test("data requests: owners only, one identifier, and erase/suppress need it typed again", async () => {
+  const phone = "+447700900701";
+  const path = (k: string) => `/businesses/${A}/data/${k}`;
+  assert.equal((await api("POST", path("export"), tStaffA, { phone })).status, 403);
+  assert.equal((await api("POST", `/businesses/${B}/data/export`, tOwnerB, { phone })).status, 404, "another business has no such person");
+  assert.equal((await api("POST", path("export"), tOwnerA, {})).status, 422);
+  assert.equal((await api("POST", path("export"), tOwnerA, { phone, email: "a@b.co" })).status, 422);
+
+  const exp = await api("POST", path("export"), tOwnerA, { phone: "07700 900701" });
+  assert.equal(exp.status, 200);
+  assert.ok(exp.body.data.messages.length > 0);
+  assert.equal((await api("POST", path("export"), tOwnerA, { phone: "+447700900999" })).status, 404);
+
+  assert.equal((await api("POST", path("erase"), tOwnerA, { phone })).status, 422, "needs confirmation");
+  assert.equal((await api("POST", path("erase"), tOwnerA, { phone, confirm: "+447700900702" })).status, 422);
+  assert.equal((await api("POST", path("erase"), tOwnerA, { phone, confirm: "+44 7700 900701" })).status, 200);
+  assert.equal((await api("POST", path("erase"), tOwnerA, { phone, confirm: phone })).status, 404, "already gone");
+  const left = await withTenant(A, (db) => many(db, "select m.body from messages m join conversations v on v.id = m.conversation_id join contact_identities i on i.contact_id = v.contact_id where i.value = $1", [phone]));
+  assert.ok(left.every((m: any) => m.body === null));
+
+  assert.equal((await api("POST", path("suppress"), tOwnerA, { email: "spam@example.com" })).status, 422);
+  assert.equal((await api("POST", path("suppress"), tOwnerA, { email: "spam@example.com", confirm: "spam@example.com", reason: "asked us to stop" })).status, 200);
+  const sup = await withTenant(A, (db) => one(db, "select value from suppression where value = 'spam@example.com'"));
+  assert.ok(sup);
+  const log = await withTenant(A, (db) => one(db, "select actor from audit_log where action = 'contact.suppressed' order by id desc limit 1"));
+  assert.match(log.actor, /^member:/, "the audit log names who did it");
+
+  const reqs = await api("GET", path("requests"), tOwnerA);
+  assert.deepEqual([...new Set(reqs.body.requests.map((r: any) => r.kind))].sort(), ["erase", "export"]);
+  assert.equal((await api("GET", path("requests"), tStaffA)).status, 403);
+});
+
+test("agents: platform admins see versions and which business pins what", async () => {
+  assert.equal((await api("GET", "/agents", tOwnerA)).status, 403);
+  assert.equal((await api("GET", "/agents", tAdminNoMfa)).status, 403);
+  await withAdmin((db) => db.query("update tenants set settings = settings || '{\"agentVersions\": {\"drafting\": \"1.0.0\"}}'::jsonb where id = $1", [A]));
+  const res = await api("GET", "/agents", tAdminMfa);
+  assert.equal(res.status, 200);
+  assert.ok(res.body.agents.length > 0 && res.body.agents.every((a: any) => a.versions.length > 0));
+  assert.deepEqual(res.body.businesses.find((b: any) => b.id === A).pinned, { drafting: "1.0.0" });
+  assert.deepEqual(res.body.businesses.find((b: any) => b.id === B).pinned, {});
+  await withAdmin((db) => db.query("update tenants set settings = settings - 'agentVersions' where id = $1", [A]));
 });
