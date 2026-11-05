@@ -31,7 +31,7 @@ Checkatrade email / webhook ──┘   (contact matched   └──────
 | Database: businesses, people, channels, conversations, drafts, holds, audit log, data requests. Row-level security on every table | `supabase/migrations/` |
 | Webhook server: WhatsApp (signature checked), forms, Checkatrade, Google connection | `src/app.ts` |
 | Worker: agent runs, approvals, sending, Gmail checks, hold expiry, retention, stuck-message sweep | `src/jobs/tasks.ts`, `src/worker.ts` |
-| Use cases | `src/workflows/answer-enquiry.ts` |
+| Use cases | `src/workflows/answer-enquiry.ts`, `src/workflows/chase-quotes.ts` |
 | WhatsApp approvals | `src/approvals.ts` |
 | Sending | `src/outbox.ts` |
 | Diary: availability, holds, confirmation | `src/calendar.ts` |
@@ -262,7 +262,7 @@ A web app where the platform admin (Charlotte) and each business owner can see a
 ### Phase 2: next skills for trades (the floor layer)
 
 - **A standard skill format:** trigger (message, schedule or event such as a job booked), agents, permitted tools, approval rule. New use cases then become configuration plus a small workflow.
-- **Chase quotes:** if a quoted customer hasn't replied after N days, draft a follow-up for approval.
+- **Chase quotes (built):** the owner taps "Mark quote as sent" on a conversation in the web app. If the customer says nothing for 3 days (per business: `tenant_use_cases.config.afterDays`), a daily job (09:00) drafts one polite follow-up from a fixed template, which goes through the normal approval. Skipped if the customer has replied, has a reply waiting, opted out, or the quote is over 30 days old. WhatsApp is only used while its 24-hour window is open; otherwise email, or a call suggestion. On by default for the flooring and trades templates. Marking the quote as sent again re-arms it. Tests: `test/chase.test.ts`.
 - **Order materials for a job:** when a job is confirmed, draft the supplier order for delivery the day before, add it to the diary, and send for approval.
 - **Ask for reviews:** after the job, send a Google or Checkatrade review request.
 

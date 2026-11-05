@@ -309,18 +309,33 @@ admin.get("/businesses/:id/conversations/:convId", async (c) => {
   const { tenantId } = tenantAccess(c, c.req.param("id"));
   const convId = uuid(c.req.param("convId"));
   const out = await withTenant(tenantId, async (db) => {
-    const conv = await one(db, "select v.id, v.status, ct.name from conversations v join contacts ct on ct.id = v.contact_id where v.id = $1", [convId]);
+    const conv = await one(db, "select v.id, v.status, v.quoted_at, v.chased_at, ct.name from conversations v join contacts ct on ct.id = v.contact_id where v.id = $1", [convId]);
     if (!conv) return undefined;
     return {
       conversation: conv,
       messages: await many(db, "select id, direction, channel, subject, body, from_name, data_tags, received_at from messages where conversation_id = $1 order by received_at", [convId]),
       drafts: await many(db,
-        `select id, reply_route, body, original_body, (body <> original_body) as edited, review, needs_attention, attention_reason, status, created_at, decided_at
+        `select id, kind, reply_route, body, original_body, (body <> original_body) as edited, review, needs_attention, attention_reason, status, created_at, decided_at
          from drafts where conversation_id = $1 order by created_at`, [convId]),
     };
   });
   if (!out) throw notFound();
   return c.json(out);
+});
+
+admin.post("/businesses/:id/conversations/:convId/quote", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"));
+  const convId = uuid(c.req.param("convId"));
+  const { sent } = await parse(c, z.object({ sent: z.boolean() }));
+  const found = await withTenant(tenantId, async (db) => {
+    const r = await db.query(
+      sent ? "update conversations set quoted_at = now(), chased_at = null where id = $1" : "update conversations set quoted_at = null, chased_at = null where id = $1", [convId]);
+    if (!r.rowCount) return false;
+    await audit(db, { tenantId, actor: actor.audit, action: sent ? "quote.marked_sent" : "quote.unmarked", entity: "conversation", entityId: convId });
+    return true;
+  });
+  if (!found) throw notFound();
+  return c.json({ ok: true });
 });
 
 function decisionResponse(c: Context, r: DecisionResult) {
