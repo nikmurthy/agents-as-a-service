@@ -1,16 +1,18 @@
 import { Hono } from "hono";
 import { env } from "./env.js";
 import { one, withAdmin, withTenant } from "./db.js";
-import { encryptJson, sign, verify, verifyMetaSignature } from "./crypto.js";
+import { encryptJson, verify, verifyMetaSignature } from "./crypto.js";
 import { clients } from "./integrations/index.js";
 import { parseCheckatradeWebhook, parseWebForm, parseWhatsAppWebhook, waToInbound } from "./channels/parse.js";
 import { ingest } from "./ingest.js";
 import { handleOwnerMessage } from "./approvals.js";
 import { audit } from "./audit.js";
+import { adminApi } from "./admin/routes.js";
 
 export const app = new Hono();
 
 app.get("/health", (c) => c.json({ ok: true }));
+app.route("/api", adminApi);
 
 // ---------------------------------------------------------------- WhatsApp (customers and owners)
 app.get("/webhooks/whatsapp", (c) => {
@@ -58,9 +60,6 @@ app.post("/webhooks/checkatrade/:token", async (c) => {
 });
 
 // ---------------------------------------------------------------- Google connection (Gmail + Calendar)
-export function googleConnectLink(tenantId: string): string {
-  return `${env.publicBaseUrl}/connect/google?s=${encodeURIComponent(sign({ t: tenantId, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }))}`;
-}
 const redirectUri = () => `${env.publicBaseUrl}/oauth/google/callback`;
 
 app.get("/connect/google", (c) => {

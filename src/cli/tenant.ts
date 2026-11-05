@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { closePool, many, withTenant } from "../db.js";
 import { addWebhook, connectWhatsApp, createTenant, setTenantStatus, tenantBySlug } from "../onboarding.js";
-import { googleConnectLink } from "../app.js";
+import { googleConnectLink } from "../connections.js";
 import { releaseQueue } from "../jobs/queue.js";
 
 const HELP = `

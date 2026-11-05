@@ -157,12 +157,23 @@ The tests wipe that database. They run the whole journey against real Postgres, 
 - Erasing a person removes their details and cancels their booking.
 - Messages for a paused business are stored but not acted on.
 
+## Admin API
+
+`/api/*` serves the admin web app. Callers send their Supabase Auth access token as `Authorization: Bearer <token>` (no cookies). Set `SUPABASE_JWT_SECRET` (or `SUPABASE_URL` for asymmetric keys) and `ADMIN_ORIGIN` (the web app's address, for CORS).
+
+- **Who can do what:** platform admins (rows in `platform_admins`, and the sign-in must be two-factor) can open any business. Owners can change settings and connections for their own business; staff can view and approve. Someone else's business always looks like it doesn't exist (404).
+- **Settings** are checked by one shared schema (`src/admin/settings-schema.ts`); every save keeps the old version in the audit log.
+- **Approvals** on the web and on WhatsApp share `src/decisions.ts`, so they behave identically (double-decide safe, slots released on reject).
+- **Secrets are write-only.** Tokens are never returned. Webhook addresses are shown to owners only.
+- **Endpoints:** `GET /me`; `GET/POST /businesses`; `POST /businesses/:id/status`; `GET /businesses/:id`; `GET/PUT /businesses/:id/settings`; `PUT /businesses/:id/use-cases/:useCase`; `GET /businesses/:id/drafts`; `POST /businesses/:id/drafts/:draftId/{approve,reject,edit}`; `GET /businesses/:id/connections`; `POST .../connections/{whatsapp,webhook}`; `POST .../connections/:connId/disable`; `GET .../google-link`.
+- **Add the first admin** after they have signed in once: `insert into platform_admins (user_id, email) values ('<auth user id>', '<email>');`, and link owners with `update tenant_members set user_id = '<auth user id>' where id = '<member id>';`.
+
 ## Limits to know before the first customers
 
 - **Google verification.** While the Google app is in *Testing*, only test users you list can connect (up to 100), and their connection expires every 7 days. Before real customers, submit the app for verification. Reading Gmail is a restricted scope and needs an annual independent security assessment. Calendar alone is much lighter.
 - **WhatsApp for each business.** Connecting a business's own number is done by hand for now (phone number id + token). For scale, become a Meta Tech Provider and add Embedded Signup. WhatsApp replies to customers only go out within 24 hours of their last message; after that the owner is told to reply directly.
 - **Checkatrade.** There's no reply API, so the owner pastes Checkatrade replies themselves. The lead webhook is only for strategic accounts. Most leads arrive by email, which is covered.
-- **Not built yet:** Outlook, Instagram and Facebook DMs, SMS, a web dashboard (Supabase logins are already allowed for in the security rules), self-serve sign-up, billing, and auto-send without approval.
+- **Not built yet:** Outlook, Instagram and Facebook DMs, SMS, the admin web screens (the API behind them is built, see *Admin API*), self-serve sign-up, billing, and auto-send without approval.
 
 ## Next build
 
@@ -175,6 +186,8 @@ Work through these in order. Each phase should leave `npm run typecheck` and `np
 3. **Onboard The Health Nutritionist** as the first business and test the full loop on a real inbox.
 
 ### Phase 1: admin web app (the main next piece)
+
+**Status:** the backend is built (see *Admin API* below): sign-in checks, businesses, overview, settings, use cases, inbox with approve/edit/reject, and connections. Still to do: the screens themselves, then Bookings, Activity, People, Data requests and Agents endpoints.
 
 A web app where the platform admin (Charlotte) and each business owner can see and manage settings, instead of using the command line and the Supabase table editor.
 
