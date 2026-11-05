@@ -33,4 +33,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run admin:install
+      - run: npm run admin:build
       - run: npm test

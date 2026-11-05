@@ -38,6 +38,8 @@ Checkatrade email / webhook ──┘   (contact matched   └──────
 | Agents (versioned) and sector rules | `config/agents/`, `config/packs/*.md` |
 | Sector templates for onboarding | `config/packs/*.template.json` (flooring, trades, practitioner) |
 | Onboarding and data-rights commands | `src/cli/` |
+| Admin web app and its API | `apps/admin/`, `src/admin/` |
+| Approve / reject / edit, shared by WhatsApp and the web app | `src/decisions.ts` |
 
 ## One-time setup
 
@@ -137,6 +139,34 @@ Checkatrade lead emails are picked up automatically from their Gmail.
   npm run prod:data -- suppress --slug marks-flooring --email jo@example.com --reason "opted out"
   ```
 
+## Admin web app
+
+A mobile-friendly web app at `/admin/` on the same server. Platform admins see every business; owners and staff see only their own. The API is under `/api` (`src/admin/`), the app is in `apps/admin/` (Vite + React).
+
+- **Sign-in:** Supabase Auth, email and password. Platform admins must also pass a TOTP code (the session must be `aal2`), otherwise they get no admin powers.
+- **Roles:** owners change settings, connections and people. Staff can view and approve drafts. Owners can pause and resume their own business. Platform admins can also create businesses, close them, and see agent versions.
+- **Approve / Edit / Reject** in the inbox use the same code as the WhatsApp buttons (`src/decisions.ts`), so a double tap on either never sends twice.
+- **Secrets are write-only:** a WhatsApp token is encrypted on save and is never returned by any endpoint.
+- Every change is in the audit log with who made it. Settings changes keep the previous version.
+
+**Set up**
+1. In Supabase: Authentication → Providers: keep email on. Authentication → Multi-factor: enable TOTP. Turn off public sign-ups (people are added by an admin or an owner).
+2. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_JWT_SECRET` (Project Settings → API). With a newer project that signs with asymmetric keys, leave `SUPABASE_JWT_SECRET` empty and the server uses the project's published keys.
+3. Run the migrations (`npm run migrate`). This adds `platform_admins`.
+4. Create your own login in Supabase (Authentication → Users), then add yourself as a platform admin:
+   ```sql
+   insert into platform_admins (user_id, email) values ('<your auth user id>', '<your email>');
+   ```
+5. Build the app, then start the server **from the repository root** (it serves `apps/admin/dist`):
+   ```bash
+   npm run admin:install && npm run admin:build
+   npm run server
+   ```
+   Sign in at `https://<your domain>/admin/`. You'll be asked to set up two-factor on first sign-in.
+6. Create a business, then add its owner under **People**. When the owner first signs in with the same email address, their login is linked automatically.
+
+For local work, `npm run admin:dev` runs the app with hot reload and proxies `/api` to the server.
+
 ## Tests
 
 ```bash
@@ -162,7 +192,7 @@ The tests wipe that database. They run the whole journey against real Postgres, 
 - **Google verification.** While the Google app is in *Testing*, only test users you list can connect (up to 100), and their connection expires every 7 days. Before real customers, submit the app for verification. Reading Gmail is a restricted scope and needs an annual independent security assessment. Calendar alone is much lighter.
 - **WhatsApp for each business.** Connecting a business's own number is done by hand for now (phone number id + token). For scale, become a Meta Tech Provider and add Embedded Signup. WhatsApp replies to customers only go out within 24 hours of their last message; after that the owner is told to reply directly.
 - **Checkatrade.** There's no reply API, so the owner pastes Checkatrade replies themselves. The lead webhook is only for strategic accounts. Most leads arrive by email, which is covered.
-- **Not built yet:** Outlook, Instagram and Facebook DMs, SMS, a web dashboard (Supabase logins are already allowed for in the security rules), self-serve sign-up, billing, and auto-send without approval.
+- **Not built yet:** Outlook, Instagram and Facebook DMs, SMS, self-serve sign-up, billing, and auto-send without approval.
 
 ## Next build
 
@@ -174,7 +204,9 @@ Work through these in order. Each phase should leave `npm run typecheck` and `np
 2. **Deploy the server and worker** to a UK or EU host (Fly.io London preferred), with secrets from Bitwarden or the host's encrypted settings. `/health` should respond on the public URL.
 3. **Onboard The Health Nutritionist** as the first business and test the full loop on a real inbox.
 
-### Phase 1: admin web app (the main next piece)
+### Phase 1: admin web app (built; see [Admin web app](#admin-web-app))
+
+The first version is built and tested. Still to do: magic-link and Google sign-in (email and password only for now), invite emails (owners are added by an admin and signed in with a password you set in Supabase), a template manager, and a check against a real Supabase project. The original brief follows for reference.
 
 A web app where the platform admin (Charlotte) and each business owner can see and manage settings, instead of using the command line and the Supabase table editor.
 

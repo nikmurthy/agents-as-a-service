@@ -36,5 +36,10 @@ export const env = {
   // Checkatrade lead webhook (strategic accounts only): comma-separated source IPs allowed
   get checkatradeAllowedIps() { return opt("CHECKATRADE_ALLOWED_IPS").split(",").map((s) => s.trim()).filter(Boolean); },
 
+  // Admin web app: Supabase Auth. Set SUPABASE_JWT_SECRET (legacy HS256 projects) or SUPABASE_URL (asymmetric keys, verified via JWKS).
+  get supabaseUrl() { return opt("SUPABASE_URL"); },
+  get supabaseAnonKey() { return opt("SUPABASE_ANON_KEY"); },
+  get supabaseJwtSecret() { return opt("SUPABASE_JWT_SECRET"); },
+
   get holdHours() { return Number(opt("HOLD_HOURS", "48")); },
 };
