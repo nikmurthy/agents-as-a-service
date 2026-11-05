@@ -2,7 +2,8 @@
   "_note": "Starting settings for a trades business (plumbing, heating). Replace prices per business.",
   "useCases": [
     "answer_enquiries",
-    "book_appointments"
+    "book_appointments",
+    "chase_quotes"
   ],
   "settings": {
     "tone": "Friendly, plain-spoken and practical. Short sentences. No jargon. Never pushy.",

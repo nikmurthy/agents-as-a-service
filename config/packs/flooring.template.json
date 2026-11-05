@@ -2,7 +2,8 @@
   "_note": "Starting settings for a flooring business. Price guide figures are EXAMPLES: replace per business.",
   "useCases": [
     "answer_enquiries",
-    "book_appointments"
+    "book_appointments",
+    "chase_quotes"
   ],
   "settings": {
     "tone": "Friendly, straightforward and quick. Sounds like the owner texting, not a call centre. Short sentences.",

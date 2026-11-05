@@ -53,4 +53,4 @@ export const newBusinessSchema = z.object({
   useCases: z.array(z.enum(["answer_enquiries", "book_appointments"])).optional(),
 });
 
-export const USE_CASES = ["answer_enquiries", "book_appointments"] as const;
+export const USE_CASES = ["answer_enquiries", "book_appointments", "chase_quotes"] as const;

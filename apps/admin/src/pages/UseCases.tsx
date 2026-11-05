@@ -5,6 +5,7 @@ import { ErrorNote, Loading, Page, useAction, useLoad } from "../ui";
 const INFO: Record<string, [string, string]> = {
   answer_enquiries: ["Answer enquiries", "Drafts replies to new messages for you to approve."],
   book_appointments: ["Book appointments", "Offers free times from your calendar and holds them while the customer decides."],
+  chase_quotes: ["Chase quotes", "Once you mark a quote as sent, drafts one polite follow-up after three quiet days for you to approve."],
 };
 
 export function UseCases() {
