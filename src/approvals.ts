@@ -4,8 +4,7 @@ import { platformWaSender } from "./connections.js";
 import { approvers } from "./tenants.js";
 import { env } from "./env.js";
 import { audit } from "./audit.js";
-import { enqueue } from "./jobs/queue.js";
-import { releaseHold } from "./calendar.js";
+import { decideDraft, type DecisionResult } from "./decisions.js";
 import type { WaInbound } from "./channels/parse.js";
 
 // Owners approve drafts on WhatsApp, from the platform's own number.
@@ -84,49 +83,37 @@ export async function handleOwnerMessage(w: WaInbound): Promise<void> {
       `select ar.id, ar.tenant_id, ar.draft_id, ar.member_id from approval_requests ar
        where ar.member_id = any($1) and ar.state = 'awaiting_edit' order by ar.updated_at desc limit 1`, [members.map((m) => m.id)]));
     if (pending) {
-      const result = await withTenant(pending.tenant_id, async (db) => {
-        const d = await one(db, "select status from drafts where id = $1 for update", [pending.draft_id]);
-        if (d?.status !== "pending_approval") return "That draft has already been dealt with.";
-        await db.query("update drafts set body = $2, status = 'approved', decided_by = $3, decided_at = now() where id = $1", [pending.draft_id, w.text, pending.member_id]);
-        await db.query("update approval_requests set state = 'done', updated_at = now() where draft_id = $1", [pending.draft_id]);
-        await audit(db, { tenantId: pending.tenant_id, actor: `member:${pending.member_id}`, action: "draft.edited_and_approved", entity: "draft", entityId: pending.draft_id });
-        return "Got it. Sending your version now ✓";
-      });
-      await enqueue("send_outbox", { tenantId: pending.tenant_id, draftId: pending.draft_id }, { jobKey: `outbox:${pending.draft_id}` });
-      await reply(result);
+      const r = await decideDraft(pending.tenant_id, whatsappActor(pending.member_id), pending.draft_id, { action: "edit", body: w.text });
+      await reply(r.outcome === "edited" ? "Got it. Sending your version now ✓" : "That draft has already been dealt with.");
       return;
     }
   }
   await reply("Use the Approve, Edit or Reject buttons on a draft. After pressing Edit, send the reply exactly as you want it to go.");
 }
 
+const whatsappActor = (memberId: string) => ({ memberId, label: `member:${memberId}`, via: "whatsapp" as const });
+
 async function decide(tenantId: string, memberId: string, draftId: string, action: "a" | "e" | "r"): Promise<string | undefined> {
-  const out = await withTenant(tenantId, async (db) => {
-    const d = await one(db,
-      "select d.status, d.reply_route, coalesce(ct.name, 'the customer') as customer, r.booking from drafts d join conversations c on c.id = d.conversation_id join contacts ct on ct.id = c.contact_id left join runs r on r.id = d.run_id where d.id = $1 for update of d",
-      [draftId]);
-    if (!d) return { text: "Sorry, I couldn't find that draft." };
-    if (d.status !== "pending_approval") return { text: `Already ${d.status.replace("_", " ")}.` };
-    const first = d.customer.split(/\s+/)[0];
-    if (action === "e") {
+  if (action === "e") {
+    return withTenant(tenantId, async (db) => {
+      const d = await one(db,
+        "select d.status, coalesce(ct.name, 'the customer') as customer from drafts d join conversations c on c.id = d.conversation_id join contacts ct on ct.id = c.contact_id where d.id = $1 for update of d",
+        [draftId]);
+      if (!d) return "Sorry, I couldn't find that draft.";
+      if (d.status !== "pending_approval") return `Already ${d.status.replace("_", " ")}.`;
       await db.query("update approval_requests set state = 'awaiting_edit', updated_at = now() where draft_id = $1 and member_id = $2", [draftId, memberId]);
-      return { text: `OK. Send me the reply to ${first} exactly as you want it to go.` };
-    }
-    if (action === "r") {
-      await db.query("update drafts set status = 'rejected', decided_by = $2, decided_at = now() where id = $1", [draftId, memberId]);
-      await db.query("update approval_requests set state = 'done', updated_at = now() where draft_id = $1", [draftId]);
-      // Free any times we were holding for this reply.
-      for (const h of d.booking?.action === "propose_slots" ? d.booking.holdIds ?? [] : []) await releaseHold(db, h, "released");
-      await audit(db, { tenantId, actor: `member:${memberId}`, action: "draft.rejected", entity: "draft", entityId: draftId });
-      return { text: `Rejected. Nothing was sent to ${first}.` };
-    }
-    await db.query("update drafts set status = 'approved', decided_by = $2, decided_at = now() where id = $1", [draftId, memberId]);
-    await db.query("update approval_requests set state = 'done', updated_at = now() where draft_id = $1", [draftId]);
-    await audit(db, { tenantId, actor: `member:${memberId}`, action: "draft.approved", entity: "draft", entityId: draftId });
-    return { text: ["whatsapp", "email"].includes(d.reply_route) ? `Approved. Sending to ${first} now ✓` : undefined, send: true };
-  });
-  if ((out as any).send) await enqueue("send_outbox", { tenantId, draftId }, { jobKey: `outbox:${draftId}` });
-  return out.text;
+      return `OK. Send me the reply to ${d.customer.split(/\s+/)[0]} exactly as you want it to go.`;
+    });
+  }
+  return replyText(await decideDraft(tenantId, whatsappActor(memberId), draftId, { action: action === "a" ? "approve" : "reject" }));
+}
+
+function replyText(r: DecisionResult): string | undefined {
+  if (r.outcome === "not_found") return "Sorry, I couldn't find that draft.";
+  if (r.outcome === "already_decided") return `Already ${r.status.replace("_", " ")}.`;
+  const first = r.customer.split(/\s+/)[0];
+  if (r.outcome === "rejected") return `Rejected. Nothing was sent to ${first}.`;
+  return ["whatsapp", "email"].includes(r.route) ? `Approved. Sending to ${first} now ✓` : undefined;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);

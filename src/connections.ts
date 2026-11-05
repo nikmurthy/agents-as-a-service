@@ -1,6 +1,6 @@
 import type { Db } from "./db.js";
 import { one } from "./db.js";
-import { decryptJson, encryptJson } from "./crypto.js";
+import { decryptJson, encryptJson, sign } from "./crypto.js";
 import { clients } from "./integrations/index.js";
 import type { GoogleTokens } from "./integrations/google.js";
 import type { WaSender } from "./integrations/whatsapp.js";
@@ -45,3 +45,8 @@ export async function tenantWaSender(db: Db): Promise<WaSender | undefined> {
 
 /** The platform's own WhatsApp number, for messages to business owners. */
 export const platformWaSender = (): WaSender => ({ phoneNumberId: env.platformWaPhoneNumberId, accessToken: env.platformWaToken });
+
+/** Link the owner opens to connect Gmail and Google Calendar. Valid for a week. */
+export function googleConnectLink(tenantId: string): string {
+  return `${env.publicBaseUrl}/connect/google?s=${encodeURIComponent(sign({ t: tenantId, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }))}`;
+}

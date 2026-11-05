@@ -44,10 +44,10 @@ export async function erasePerson(tenantId: string, who: { email?: string; phone
 }
 
 /** Opt-out: never send this person anything again from this business. */
-export async function suppress(tenantId: string, who: { email?: string; phone?: string }, reason: string) {
+export async function suppress(tenantId: string, who: { email?: string; phone?: string }, reason: string, actor = "admin") {
   const id = identity(who);
   await withTenant(tenantId, async (db) => {
     await db.query("insert into suppression (tenant_id, kind, value, reason) values (app_current_tenant(), $1, $2, $3) on conflict do nothing", [id.kind, id.value, reason]);
-    await audit(db, { tenantId, actor: "admin", action: "contact.suppressed" });
+    await audit(db, { tenantId, actor, action: "contact.suppressed" });
   });
 }
