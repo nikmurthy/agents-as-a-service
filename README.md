@@ -79,7 +79,9 @@ fly auth login
 fly apps create aaas-platform
 ```
 
-**Secrets** go straight from Bitwarden into Fly's encrypted store, without being shown or written to disk. Anyone who can sign in to the Fly account can read them from a running machine, so turn on two-factor sign-in for Fly. In a terminal of your own (not shared with anyone or any tool):
+**Deploying normally: the *Deploy production* GitHub Action** (Actions tab → Deploy production → Run workflow). It fetches the secrets from Bitwarden, copies them into Fly, deploys, and checks `/health`. Your laptop never touches production. It needs, in the `production` environment, `FLY_API_TOKEN` (`fly tokens create deploy -a aaas-platform`, which can deploy only this app) as well as the Bitwarden settings used by *Migrate production*. When the app needs a new secret, add it in Bitwarden, add a `BW_SECRET_ID_<NAME>` variable with its ID, and add it to both steps in `.github/workflows/deploy.yml`.
+
+**From a terminal instead.** Secrets go straight from Bitwarden into Fly's encrypted store, without being shown or written to disk. Anyone who can sign in to the Fly account can read them from a running machine, so turn on two-factor sign-in for Fly. In a terminal of your own (not shared with anyone or any tool):
 ```bash
 read -s "BWS_ACCESS_TOKEN?Bitwarden access token: " && export BWS_ACCESS_TOKEN   # not shown, not saved in history
 bws secret list <project id> --output env | fly secrets import --app aaas-platform --stage
