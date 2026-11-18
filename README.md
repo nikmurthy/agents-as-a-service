@@ -79,9 +79,9 @@ fly auth login
 fly apps create aaas-platform
 ```
 
-**Secrets** go straight from Bitwarden into Fly's encrypted store, without being shown or written to disk. In a terminal of your own (not shared with anyone or any tool):
+**Secrets** go straight from Bitwarden into Fly's encrypted store, without being shown or written to disk. Anyone who can sign in to the Fly account can read them from a running machine, so turn on two-factor sign-in for Fly. In a terminal of your own (not shared with anyone or any tool):
 ```bash
-export BWS_ACCESS_TOKEN="$(…paste from Bitwarden…)"
+read -s "BWS_ACCESS_TOKEN?Bitwarden access token: " && export BWS_ACCESS_TOKEN   # not shown, not saved in history
 bws secret list <project id> --output env | fly secrets import --app aaas-platform --stage
 unset BWS_ACCESS_TOKEN
 ```
