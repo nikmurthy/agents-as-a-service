@@ -11,6 +11,8 @@ primary_region = "lhr"
   AGENT_MODE = "live"
   PUBLIC_BASE_URL = "https://aaas-platform.fly.dev"
   SUPABASE_URL = "https://xptofrfhnxqbnhfinidb.supabase.co"
+  # Public by design (sent to every browser that opens the admin app); row-level security and the API do the protecting.
+  SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwdG9mcmZobnhxYm5oZmluaWRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3MjMyODgsImV4cCI6MjEwOTI5OTI4OH0.bKucD5P7kh3Sasm-iKC_Dks77oK_GNT37OUJK7-TkEE"
 
 [processes]
   server = "node --import tsx src/server.ts"
