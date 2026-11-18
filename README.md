@@ -60,17 +60,44 @@ Checkatrade email / webhook ──┘   (contact matched   └──────
    npm run prod:migrate       # database tables + job queue, secrets injected by Bitwarden
    npm run prod:agents:sync   # publishes config/agents/*.json as versioned definitions
    ```
-7. **Run two processes** (any UK or EU host, e.g. Fly.io in London or Render in Frankfurt):
-   ```bash
-   npm run server         # webhooks, public URL
-   npm run worker         # jobs; run more than one to scale
-   ```
+7. **Run two processes:** `server` (webhooks, admin app, public URL) and `worker` (jobs). Both come from one container image (`Dockerfile`), so any container host works. We use **Fly.io in London**; see [Deploying to Fly.io](#deploying-to-flyio).
 
 **Approval template** (Meta → WhatsApp Manager → Message templates). Category *Utility*, name `draft_ready_for_approval`, language English (UK).
 - Body: `{{1}}: new message from {{2}}. Suggested reply: {{3}}`
 - Quick-reply buttons: `Approve`, `Edit`, `Reject`
 
 This template is only used when the owner hasn't messaged the platform number in the last 24 hours. Otherwise approvals arrive as normal button messages.
+
+## Deploying to Fly.io
+
+`fly.toml` runs the image in London (`lhr`) as two process groups: `server` (always on, health-checked at `/health`) and `worker`. Fly.io keeps no customer data: everything lasting is in Supabase, so either process can be replaced at any time.
+
+**Once**
+```bash
+brew install flyctl
+fly auth login
+fly apps create aaas-platform
+```
+
+**Deploying normally: the *Deploy production* GitHub Action** (Actions tab → Deploy production → Run workflow). It fetches the secrets from Bitwarden, copies them into Fly, deploys, and checks `/health`. Your laptop never touches production. It needs, in the `production` environment, `FLY_API_TOKEN` (`fly tokens create deploy -a aaas-platform`, which can deploy only this app) as well as the Bitwarden settings used by *Migrate production*. When the app needs a new secret, add it in Bitwarden, add a `BW_SECRET_ID_<NAME>` variable with its ID, and add it to both steps in `.github/workflows/deploy.yml`.
+
+**From a terminal instead.** Secrets go straight from Bitwarden into Fly's encrypted store, without being shown or written to disk. Anyone who can sign in to the Fly account can read them from a running machine, so turn on two-factor sign-in for Fly. In a terminal of your own (not shared with anyone or any tool):
+```bash
+read -s "BWS_ACCESS_TOKEN?Bitwarden access token: " && export BWS_ACCESS_TOKEN   # not shown, not saved in history
+bws secret list <project id> --output env | fly secrets import --app aaas-platform --stage
+unset BWS_ACCESS_TOKEN
+```
+Run this again whenever a secret changes in Bitwarden, then `fly deploy` (or `fly secrets deploy`) to restart with it.
+
+**Deploy**
+```bash
+fly deploy                  # builds the image on Fly and rolls out server + worker
+fly status                  # both process groups running
+curl https://aaas-platform.fly.dev/health
+fly logs                    # live logs
+```
+
+Until a custom domain is set up, `PUBLIC_BASE_URL` is `https://aaas-platform.fly.dev`. Use that for the Google OAuth redirect and the WhatsApp webhook.
 
 ## Secrets and security
 
@@ -200,8 +227,8 @@ Work through these in order. Each phase should leave `npm run typecheck` and `np
 
 ### Phase 0: get production running
 
-1. **Migrate production goes green.** Run the *Migrate production* workflow and fix whatever the *Check GitHub settings* step reports. Then confirm the tables exist in Supabase.
-2. **Deploy the server and worker** to a UK or EU host (Fly.io London preferred), with secrets from Bitwarden or the host's encrypted settings. `/health` should respond on the public URL.
+1. **Migrate production goes green.** Done 18 Nov 2026: tables created and agents published.
+2. **Deploy the server and worker** to Fly.io in London (`fly.toml`, `Dockerfile`; see [Deploying to Fly.io](#deploying-to-flyio)). `/health` should respond on the public URL.
 3. **Onboard The Health Nutritionist** as the first business and test the full loop on a real inbox.
 
 ### Phase 1: admin web app (built; see [Admin web app](#admin-web-app))

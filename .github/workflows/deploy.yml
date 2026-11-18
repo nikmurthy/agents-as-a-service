@@ -1,0 +1,76 @@
+# Deploys the server and worker to Fly.io (London).
+# Secrets come from Bitwarden Secrets Manager at run time and go straight into Fly's encrypted store;
+# nothing production-related is stored in GitHub except the Bitwarden access token and a Fly deploy
+# token that can deploy only this app.
+name: Deploy production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      FLY_APP: aaas-platform
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check GitHub settings
+        env:
+          HAS_FLY_TOKEN: ${{ secrets.FLY_API_TOKEN != '' }}
+          HAS_BW_TOKEN: ${{ secrets.BW_ACCESS_TOKEN != '' }}
+        run: |
+          ok=1
+          if [ "$HAS_FLY_TOKEN" = "true" ]; then echo "✓ FLY_API_TOKEN is set"; else echo "::error::FLY_API_TOKEN is missing. Create one with: fly tokens create deploy -a $FLY_APP, then add it under Settings → Environments → production → Environment secrets."; ok=0; fi
+          if [ "$HAS_BW_TOKEN" = "true" ]; then echo "✓ BW_ACCESS_TOKEN is set"; else echo "::error::BW_ACCESS_TOKEN is missing."; ok=0; fi
+          [ "$ok" = 1 ] || exit 1
+
+      - name: Get production secrets from Bitwarden
+        uses: bitwarden/sm-action@v2
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          # For a Bitwarden EU account, uncomment:
+          # base_url: https://vault.bitwarden.eu
+          # Add a line here (and a BW_SECRET_ID_<NAME> variable) for each new secret the app needs.
+          secrets: |
+            ${{ vars.BW_SECRET_ID_DATABASE_URL }} > DATABASE_URL
+            ${{ vars.BW_SECRET_ID_DATA_ENCRYPTION_KEY }} > DATA_ENCRYPTION_KEY
+            ${{ vars.BW_SECRET_ID_SIGNING_SECRET }} > SIGNING_SECRET
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        with:
+          version: 0.5.12
+
+      # Staged: takes effect with the deploy below. Values are never printed.
+      - name: Copy secrets into Fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          {
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'DATA_ENCRYPTION_KEY=%s\n' "$DATA_ENCRYPTION_KEY"
+            printf 'SIGNING_SECRET=%s\n' "$SIGNING_SECRET"
+          } | flyctl secrets import --app "$FLY_APP" --stage > /dev/null
+          flyctl secrets list --app "$FLY_APP"
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        # --ha=false: one machine per process to start with; scale with `fly scale count`.
+        run: flyctl deploy --app "$FLY_APP" --remote-only --ha=false
+
+      - name: Check the live app
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS "https://$FLY_APP.fly.dev/health"; then echo; exit 0; fi
+            sleep 5
+          done
+          echo "::error::/health did not respond"; exit 1

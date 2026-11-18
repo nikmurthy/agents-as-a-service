@@ -1,0 +1,10 @@
+node_modules
+apps/admin/node_modules
+apps/admin/dist
+.git
+.github
+.env
+.env.*
+*.log
+.DS_Store
+test
