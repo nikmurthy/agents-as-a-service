@@ -9,6 +9,8 @@ primary_region = "lhr"
   PORT = "8080"
   NODE_ENV = "production"
   AGENT_MODE = "live"
+  PUBLIC_BASE_URL = "https://aaas-platform.fly.dev"
+  SUPABASE_URL = "https://xptofrfhnxqbnhfinidb.supabase.co"
 
 [processes]
   server = "node --import tsx src/server.ts"
