@@ -1,5 +1,5 @@
 # Deploys the server and worker to Fly.io (London).
-# Secrets come from Bitwarden Secrets Manager at run time and go straight into Fly's encrypted store;
+# Every secret in the Bitwarden project goes straight into Fly's encrypted store at run time;
 # nothing production-related is stored in GitHub except the Bitwarden access token and a Fly deploy
 # token that can deploy only this app.
 name: Deploy production
@@ -33,33 +33,50 @@ jobs:
           if [ "$HAS_BW_TOKEN" = "true" ]; then echo "✓ BW_ACCESS_TOKEN is set"; else echo "::error::BW_ACCESS_TOKEN is missing."; ok=0; fi
           [ "$ok" = 1 ] || exit 1
 
-      - name: Get production secrets from Bitwarden
-        uses: bitwarden/sm-action@v2
-        with:
-          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
-          # For a Bitwarden EU account, uncomment:
-          # base_url: https://vault.bitwarden.eu
-          # Add a line here (and a BW_SECRET_ID_<NAME> variable) for each new secret the app needs.
-          secrets: |
-            ${{ vars.BW_SECRET_ID_DATABASE_URL }} > DATABASE_URL
-            ${{ vars.BW_SECRET_ID_DATA_ENCRYPTION_KEY }} > DATA_ENCRYPTION_KEY
-            ${{ vars.BW_SECRET_ID_SIGNING_SECRET }} > SIGNING_SECRET
-
       - uses: superfly/flyctl-actions/setup-flyctl@master
         with:
           version: 0.5.12
 
-      # Staged: takes effect with the deploy below. Values are never printed.
-      - name: Copy secrets into Fly
+      - name: Install the Bitwarden Secrets Manager CLI
         env:
+          BWS_VERSION: 2.1.0
+        run: |
+          cd "$RUNNER_TEMP"
+          base="https://github.com/bitwarden/sdk-sm/releases/download/bws-v$BWS_VERSION"
+          curl -fsSLO "$base/bws-x86_64-unknown-linux-gnu-$BWS_VERSION.zip"
+          curl -fsSLO "$base/bws-sha256-checksums-$BWS_VERSION.txt"
+          grep " bws-x86_64-unknown-linux-gnu-$BWS_VERSION.zip" "bws-sha256-checksums-$BWS_VERSION.txt" | sha256sum -c -
+          unzip -q "bws-x86_64-unknown-linux-gnu-$BWS_VERSION.zip" -d bws-bin
+          echo "$RUNNER_TEMP/bws-bin" >> "$GITHUB_PATH"
+
+      # Every secret in the Bitwarden project goes into Fly, so a new secret only needs adding in Bitwarden
+      # (named exactly as the variable in .env.example). Names set in fly.toml [env] are skipped.
+      # Staged: takes effect with the deploy below. Values are masked and never printed.
+      - name: Copy secrets from Bitwarden into Fly
+        env:
+          BWS_ACCESS_TOKEN: ${{ secrets.BW_ACCESS_TOKEN }}
+          BW_PROJECT_ID: ${{ vars.BW_PROJECT_ID }}
+          BW_PROJECT_NAME: agents-as-a-service-production
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          {
-            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
-            printf 'DATA_ENCRYPTION_KEY=%s\n' "$DATA_ENCRYPTION_KEY"
-            printf 'SIGNING_SECRET=%s\n' "$SIGNING_SECRET"
-          } | flyctl secrets import --app "$FLY_APP" --stage > /dev/null
-          flyctl secrets list --app "$FLY_APP"
+          set -euo pipefail
+          pid="$BW_PROJECT_ID"
+          if [ -z "$pid" ]; then
+            projects="$(bws project list --output json)"
+            pid="$(jq -r --arg n "$BW_PROJECT_NAME" '[.[] | select(.name == $n)][0].id // empty' <<<"$projects")"
+            [ -n "$pid" ] || { [ "$(jq length <<<"$projects")" = 1 ] && pid="$(jq -r '.[0].id' <<<"$projects")"; } || true
+          fi
+          [ -n "$pid" ] || { echo "::error::Couldn't find the Bitwarden project. Set a BW_PROJECT_ID variable in the production environment."; exit 1; }
+          secrets="$(bws secret list "$pid" --output json)"
+          jq -r '.[].value | split("\n")[] | select(length > 0) | "::add-mask::" + .' <<<"$secrets"
+          skip='["PORT","NODE_ENV","AGENT_MODE","PUBLIC_BASE_URL","SUPABASE_URL"]'
+          jq -r --argjson skip "$skip" '.[] | select((.key | IN($skip[])) | not) | select(.value != "") | "\(.key)=\(.value)"' <<<"$secrets" \
+            | flyctl secrets import --app "$FLY_APP" --stage > /dev/null
+          echo "Secrets now in Fly:"; flyctl secrets list --app "$FLY_APP"
+          for name in DATABASE_URL DATA_ENCRYPTION_KEY SIGNING_SECRET ANTHROPIC_API_KEY WA_APP_SECRET WA_VERIFY_TOKEN \
+                      PLATFORM_WA_PHONE_NUMBER_ID PLATFORM_WA_TOKEN GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET SUPABASE_ANON_KEY; do
+            jq -e --arg n "$name" 'any(.[]; .key == $n and .value != "")' <<<"$secrets" > /dev/null || echo "::warning::$name is not in Bitwarden yet"
+          done
 
       - name: Deploy
         env:
