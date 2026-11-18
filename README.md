@@ -60,17 +60,42 @@ Checkatrade email / webhook ──┘   (contact matched   └──────
    npm run prod:migrate       # database tables + job queue, secrets injected by Bitwarden
    npm run prod:agents:sync   # publishes config/agents/*.json as versioned definitions
    ```
-7. **Run two processes** (any UK or EU host, e.g. Fly.io in London or Render in Frankfurt):
-   ```bash
-   npm run server         # webhooks, public URL
-   npm run worker         # jobs; run more than one to scale
-   ```
+7. **Run two processes:** `server` (webhooks, admin app, public URL) and `worker` (jobs). Both come from one container image (`Dockerfile`), so any container host works. We use **Fly.io in London**; see [Deploying to Fly.io](#deploying-to-flyio).
 
 **Approval template** (Meta → WhatsApp Manager → Message templates). Category *Utility*, name `draft_ready_for_approval`, language English (UK).
 - Body: `{{1}}: new message from {{2}}. Suggested reply: {{3}}`
 - Quick-reply buttons: `Approve`, `Edit`, `Reject`
 
 This template is only used when the owner hasn't messaged the platform number in the last 24 hours. Otherwise approvals arrive as normal button messages.
+
+## Deploying to Fly.io
+
+`fly.toml` runs the image in London (`lhr`) as two process groups: `server` (always on, health-checked at `/health`) and `worker`. Fly.io keeps no customer data: everything lasting is in Supabase, so either process can be replaced at any time.
+
+**Once**
+```bash
+brew install flyctl
+fly auth login
+fly apps create aaas-platform
+```
+
+**Secrets** go straight from Bitwarden into Fly's encrypted store, without being shown or written to disk. In a terminal of your own (not shared with anyone or any tool):
+```bash
+export BWS_ACCESS_TOKEN="$(…paste from Bitwarden…)"
+bws secret list <project id> --output env | fly secrets import --app aaas-platform --stage
+unset BWS_ACCESS_TOKEN
+```
+Run this again whenever a secret changes in Bitwarden, then `fly deploy` (or `fly secrets deploy`) to restart with it.
+
+**Deploy**
+```bash
+fly deploy                  # builds the image on Fly and rolls out server + worker
+fly status                  # both process groups running
+curl https://aaas-platform.fly.dev/health
+fly logs                    # live logs
+```
+
+Until a custom domain is set up, `PUBLIC_BASE_URL` is `https://aaas-platform.fly.dev`. Use that for the Google OAuth redirect and the WhatsApp webhook.
 
 ## Secrets and security
 
@@ -200,8 +225,8 @@ Work through these in order. Each phase should leave `npm run typecheck` and `np
 
 ### Phase 0: get production running
 
-1. **Migrate production goes green.** Run the *Migrate production* workflow and fix whatever the *Check GitHub settings* step reports. Then confirm the tables exist in Supabase.
-2. **Deploy the server and worker** to a UK or EU host (Fly.io London preferred), with secrets from Bitwarden or the host's encrypted settings. `/health` should respond on the public URL.
+1. **Migrate production goes green.** Done 18 Nov 2026: tables created and agents published.
+2. **Deploy the server and worker** to Fly.io in London (`fly.toml`, `Dockerfile`; see [Deploying to Fly.io](#deploying-to-flyio)). `/health` should respond on the public URL.
 3. **Onboard The Health Nutritionist** as the first business and test the full loop on a real inbox.
 
 ### Phase 1: admin web app (built; see [Admin web app](#admin-web-app))

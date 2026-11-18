@@ -1,0 +1,36 @@
+# Fly.io, London. Two processes from one image: `server` (webhooks, admin app, public URL) and `worker` (jobs).
+# Secrets are not in this file: they're imported from Bitwarden with `fly secrets import` (see README).
+app = "aaas-platform"
+primary_region = "lhr"
+
+[build]
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+  AGENT_MODE = "live"
+
+[processes]
+  server = "node --import tsx src/server.ts"
+  worker = "node --import tsx src/worker.ts"
+
+[http_service]
+  processes = ["server"]
+  internal_port = 8080
+  force_https = true
+  # Webhooks must always be answered, so the server never sleeps.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  processes = ["server", "worker"]
+  size = "shared-cpu-1x"
+  memory = "512mb"
