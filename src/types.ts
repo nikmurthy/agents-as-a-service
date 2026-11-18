@@ -42,7 +42,10 @@ export interface AgentDefinition {
   instructions: string;
   tools: string[];
   output: { name: string; description: string; schema: Record<string, unknown> };
+  /** Ceiling for one response, thinking included. */
   maxTokens: number;
+  /** How hard the model thinks: "low" for routine steps keeps cost and time down. */
+  effort?: "low" | "medium" | "high";
 }
 
 export interface TriageResult {
