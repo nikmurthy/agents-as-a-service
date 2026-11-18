@@ -69,12 +69,12 @@ jobs:
           [ -n "$pid" ] || { echo "::error::Couldn't find the Bitwarden project. Set a BW_PROJECT_ID variable in the production environment."; exit 1; }
           secrets="$(bws secret list "$pid" --output json)"
           jq -r '.[].value | split("\n")[] | select(length > 0) | "::add-mask::" + .' <<<"$secrets"
-          skip='["PORT","NODE_ENV","AGENT_MODE","PUBLIC_BASE_URL","SUPABASE_URL"]'
+          skip='["PORT","NODE_ENV","AGENT_MODE","PUBLIC_BASE_URL","SUPABASE_URL","SUPABASE_ANON_KEY"]'
           jq -r --argjson skip "$skip" '.[] | select((.key | IN($skip[])) | not) | select(.value != "") | "\(.key)=\(.value)"' <<<"$secrets" \
             | flyctl secrets import --app "$FLY_APP" --stage > /dev/null
           echo "Secrets now in Fly:"; flyctl secrets list --app "$FLY_APP"
           for name in DATABASE_URL DATA_ENCRYPTION_KEY SIGNING_SECRET ANTHROPIC_API_KEY WA_APP_SECRET WA_VERIFY_TOKEN \
-                      PLATFORM_WA_PHONE_NUMBER_ID PLATFORM_WA_TOKEN GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET SUPABASE_ANON_KEY; do
+                      PLATFORM_WA_PHONE_NUMBER_ID PLATFORM_WA_TOKEN GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
             jq -e --arg n "$name" 'any(.[]; .key == $n and .value != "")' <<<"$secrets" > /dev/null || echo "::warning::$name is not in Bitwarden yet"
           done
 
