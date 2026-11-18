@@ -50,8 +50,27 @@ export function Conversation() {
           </div>
         ))}
       </div>
+      <Quote conv={data.conversation} bizId={id} onChange={reload} />
       {data.drafts.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} />)}
     </Page>
+  );
+}
+
+function Quote({ conv, bizId, onChange }: { conv: any; bizId: string; onChange: () => void }) {
+  const { busy, error, run } = useAction();
+  const set = (sent: boolean) => run(async () => { await post(`/businesses/${bizId}/conversations/${conv.id}/quote`, { sent }); onChange(); });
+  return (
+    <Card title="Quote">
+      {conv.quoted_at
+        ? <p className="muted">Marked as sent {when(conv.quoted_at)}.{conv.chased_at ? " A follow-up has been drafted." : " If they go quiet, a follow-up will be drafted for you to approve (when \"Chase quotes\" is on)."}</p>
+        : <p className="muted">Sent this customer a quote? Mark it and the assistant can nudge them if they go quiet.</p>}
+      <ErrorNote message={error} />
+      <div className="buttons">
+        {conv.quoted_at
+          ? <button disabled={busy} onClick={() => set(false)}>Not sent after all</button>
+          : <button disabled={busy} onClick={() => set(true)}>Mark quote as sent</button>}
+      </div>
+    </Card>
   );
 }
 
@@ -62,7 +81,7 @@ function Draft({ draft, bizId, onChange }: { draft: any; bizId: string; onChange
   const pending = draft.status === "pending_approval";
   const act = (verb: string, body?: unknown) => run(async () => { await post(`/businesses/${bizId}/drafts/${draft.id}/${verb}`, body); setEditing(false); onChange(); });
   return (
-    <Card title={`Reply by ${ROUTE[draft.reply_route] ?? draft.reply_route}`}>
+    <Card title={`${draft.kind === "chase" ? "Quote follow-up" : "Reply"} by ${ROUTE[draft.reply_route] ?? draft.reply_route}`}>
       <div className="row-meta"><Status value={draft.status} />{draft.edited && <span className="pill muted">edited</span>}<span className="muted">{when(draft.created_at)}</span></div>
       {draft.needs_attention && <p className="note error">{draft.attention_reason}</p>}
       {editing ? <textarea rows={7} value={text} onChange={(e) => setText(e.target.value)} aria-label="Reply wording" /> : <p className="draft-body">{draft.body}</p>}

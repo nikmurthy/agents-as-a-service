@@ -19,7 +19,7 @@ const CHANNEL_LABEL: Record<string, string> = { email: "Email", whatsapp: "Whats
 export async function sendApproval(tenantId: string, draftId: string): Promise<void> {
   await withTenantSession(tenantId, async (db) => {
     const d = await one(db,
-      `select d.*, t.name as business, m.channel, m.body as inbound, coalesce(m.from_name, ct.name) as customer
+      `select d.*, t.name as business, d.kind, m.channel, m.body as inbound, coalesce(m.from_name, ct.name) as customer
        from drafts d join tenants t on t.id = d.tenant_id
        left join runs r on r.id = d.run_id left join messages m on m.id = r.message_id
        join conversations c on c.id = d.conversation_id join contacts ct on ct.id = c.contact_id
@@ -31,7 +31,9 @@ export async function sendApproval(tenantId: string, draftId: string): Promise<v
       return;
     }
     const first = (d.customer ?? "A customer").split(/\s+/)[0];
-    const head = `${d.needs_attention ? "⚠️ " + d.attention_reason + "\n\n" : ""}${CHANNEL_LABEL[d.channel] ?? "New"} message from ${first}:\n"${clip(d.inbound ?? "", 300)}"`;
+    const head = d.kind === "chase"
+      ? `Quote follow-up for ${first}: no reply since you sent the quote.`
+      : `${d.needs_attention ? "⚠️ " + d.attention_reason + "\n\n" : ""}${CHANNEL_LABEL[d.channel] ?? "New"} message from ${first}:\n"${clip(d.inbound ?? "", 300)}"`;
     const draftBlock = `Reply by ${ROUTE_LABEL[d.reply_route] ?? d.reply_route}:\n${d.body}`;
     const buttons = [{ id: `a:${draftId}`, title: "Approve" }, { id: `e:${draftId}`, title: "Edit" }, { id: `r:${draftId}`, title: "Reject" }];
 
@@ -49,7 +51,7 @@ export async function sendApproval(tenantId: string, draftId: string): Promise<v
       } else {
         // Template body (set up once in Meta): "{{1}}: new message from {{2}}. Draft reply: {{3}}" with buttons Approve / Edit / Reject.
         sent = await clients.whatsapp.sendTemplate(platformWaSender(), p.whatsapp_phone, env.approvalTemplateName, env.approvalTemplateLang,
-          [d.business, `${first} (${CHANNEL_LABEL[d.channel] ?? "message"})${d.needs_attention ? " ⚠️ " + d.attention_reason : ""}`, clip(d.body, 700)],
+          [d.business, `${first} (${d.kind === "chase" ? "quote follow-up" : CHANNEL_LABEL[d.channel] ?? "message"})${d.needs_attention ? " ⚠️ " + d.attention_reason : ""}`, clip(d.body, 700)],
           buttons.map((b) => b.id));
       }
       await db.query("insert into approval_requests (tenant_id, draft_id, member_id, wa_message_id) values (app_current_tenant(), $1, $2, $3)", [draftId, p.id, sent.id]);

@@ -4,6 +4,7 @@ import { answerEnquiry } from "../workflows/answer-enquiry.js";
 import { sendApproval } from "../approvals.js";
 import { sendOutbox } from "../outbox.js";
 import { pollAllGmail } from "../channels/gmail-poll.js";
+import { chaseAllQuotes } from "../workflows/chase-quotes.js";
 import { releaseHold } from "../calendar.js";
 import { audit } from "../audit.js";
 import { enqueue } from "./queue.js";
@@ -15,6 +16,9 @@ export const taskList: TaskList = {
 
   // ---- scheduled (see crontab in worker.ts)
   poll_gmail: async () => { await pollAllGmail(); },
+
+  /** Draft one follow-up for each quote that has gone quiet. */
+  chase_quotes: async () => { await chaseAllQuotes(); },
 
   /** Release held times the customer didn't pick in time. */
   expire_holds: async () => {
@@ -50,4 +54,5 @@ export const crontab = [
   "*/15 * * * * expire_holds",
   "*/5 * * * * sweep_unprocessed",
   "30 3 * * * retention",
+  "0 9 * * * chase_quotes",
 ].join("\n");

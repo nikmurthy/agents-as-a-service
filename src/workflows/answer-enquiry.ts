@@ -135,12 +135,12 @@ async function applyBooking(db: Db, tenant: Tenant, b: BookingResult, msg: any, 
 }
 
 /** First route in the tenant's preference list that we can actually use for this customer. */
-async function chooseRoute(db: Db, tenant: Tenant, channel: string, contact: { email?: string; phone?: string }): Promise<ReplyRoute> {
+export async function chooseRoute(db: Db, tenant: Tenant, channel: string, contact: { email?: string; phone?: string }, opts: { whatsappOpen?: boolean } = {}): Promise<ReplyRoute> {
   const prefs: ReplyRoute[] = (tenant.settings.replyVia as any)?.[channel] ?? [];
   const hasWa = !!(await getConnection(db, "whatsapp"));
   const hasGmail = !!(await getConnection(db, "gmail"));
   const ok = (r: ReplyRoute) =>
-    r === "whatsapp" ? !!contact.phone && hasWa
+    r === "whatsapp" ? !!contact.phone && hasWa && opts.whatsappOpen !== false
     : r === "email" ? !!contact.email && hasGmail
     : r === "checkatrade_message" ? channel === "checkatrade"
     : r === "sms" || r === "phone" ? !!contact.phone
