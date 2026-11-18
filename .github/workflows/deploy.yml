@@ -70,7 +70,8 @@ jobs:
           secrets="$(bws secret list "$pid" --output json)"
           jq -r '.[].value | split("\n")[] | select(length > 0) | "::add-mask::" + .' <<<"$secrets"
           skip='["PORT","NODE_ENV","AGENT_MODE","PUBLIC_BASE_URL","SUPABASE_URL","SUPABASE_ANON_KEY"]'
-          jq -r --argjson skip "$skip" '.[] | select((.key | IN($skip[])) | not) | select(.value != "") | "\(.key)=\(.value)"' <<<"$secrets" \
+          jq -r '.[].key | select(test("^[A-Z_][A-Z0-9_]*$") | not) | "::warning::Skipped the Bitwarden secret named \"" + . + "\": names must be capital letters, digits and _ only, exactly as in .env.example"' <<<"$secrets"
+          jq -r --argjson skip "$skip" '.[] | select(.key | test("^[A-Z_][A-Z0-9_]*$")) | select((.key | IN($skip[])) | not) | select(.value != "") | "\(.key)=\(.value)"' <<<"$secrets" \
             | flyctl secrets import --app "$FLY_APP" --stage > /dev/null
           echo "Secrets now in Fly:"; flyctl secrets list --app "$FLY_APP"
           for name in DATABASE_URL DATA_ENCRYPTION_KEY SIGNING_SECRET ANTHROPIC_API_KEY WA_APP_SECRET WA_VERIFY_TOKEN \
