@@ -7,10 +7,17 @@ import { parseCheckatradeWebhook, parseWebForm, parseWhatsAppWebhook, waToInboun
 import { ingest } from "./ingest.js";
 import { handleOwnerMessage } from "./approvals.js";
 import { audit } from "./audit.js";
+import { googleConnectLink, googleRedirectUri } from "./google-link.js";
+import { admin } from "./admin/routes.js";
+import { adminApp } from "./admin/static.js";
 
 export const app = new Hono();
 
 app.get("/health", (c) => c.json({ ok: true }));
+
+// Admin web app API (Supabase sign-in). See src/admin/.
+app.route("/api", admin);
+app.route("/", adminApp);
 
 // ---------------------------------------------------------------- WhatsApp (customers and owners)
 app.get("/webhooks/whatsapp", (c) => {
@@ -58,10 +65,8 @@ app.post("/webhooks/checkatrade/:token", async (c) => {
 });
 
 // ---------------------------------------------------------------- Google connection (Gmail + Calendar)
-export function googleConnectLink(tenantId: string): string {
-  return `${env.publicBaseUrl}/connect/google?s=${encodeURIComponent(sign({ t: tenantId, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }))}`;
-}
-const redirectUri = () => `${env.publicBaseUrl}/oauth/google/callback`;
+export { googleConnectLink };
+const redirectUri = googleRedirectUri;
 
 app.get("/connect/google", (c) => {
   const s = c.req.query("s") ?? "";
