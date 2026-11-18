@@ -8,6 +8,8 @@ import { utcToLocal } from "../time.js";
 
 let client: Anthropic | undefined;
 const anthropic = () => (client ??= new Anthropic({ apiKey: env.anthropicApiKey }));
+/** Tests only: swap in a fake client. */
+export function setAnthropicClientForTests(c: Anthropic | undefined) { client = c; }
 
 function systemPrompt(def: AgentDefinition, tenant: Tenant, now: Date): string {
   const s = tenant.settings;
@@ -42,12 +44,18 @@ export async function runAgent<T>(def: AgentDefinition, input: unknown, ctx: Too
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: "Input as JSON:\n\n" + JSON.stringify(input, null, 2) }];
   let inTok = 0, outTok = 0;
 
+  // Current models reject a forced tool_choice ("tool"/"any"), so the model chooses ("auto") and the instructions,
+  // plus a reminder after any turn that ends without it, make it finish with the output tool.
+  const system = systemPrompt(def, ctx.tenant, ctx.now) +
+    `\n\nWhen you have decided, finish by calling the ${def.output.name} tool. Don't answer in plain text.`;
+
   for (let turn = 0; turn < 8; turn++) {
-    const force = allowed.length === 0 || turn >= 6;
     const res = await anthropic().messages.create({
-      model, max_tokens: def.maxTokens, system: systemPrompt(def, ctx.tenant, ctx.now), tools: toolDefs,
-      tool_choice: force ? { type: "tool", name: def.output.name } : { type: "any" }, messages,
-    });
+      model, max_tokens: def.maxTokens, system, tools: toolDefs, tool_choice: { type: "auto" }, messages,
+      ...(def.effort ? { output_config: { effort: def.effort } } : {}),
+    } as Anthropic.MessageCreateParamsNonStreaming);
+    if ((res.stop_reason as string) === "refusal") throw new Error(`Agent ${def.id} declined this message`);
+    if (res.stop_reason === "max_tokens") throw new Error(`Agent ${def.id} ran out of room (maxTokens ${def.maxTokens})`);
     inTok += res.usage.input_tokens; outTok += res.usage.output_tokens;
     const uses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
     const final = uses.find((u) => u.name === def.output.name);
