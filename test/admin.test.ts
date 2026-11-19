@@ -249,6 +249,17 @@ test("platform keys: admins see only whether each is set, and can test them; val
   assert.deepEqual(logged.detail, { ok: true });
 });
 
+test("the live map is for platform admins and shows counts only", async () => {
+  assert.equal((await api("ownerA", "GET", "/map")).status, 403);
+  assert.equal((await api("admin", "GET", "/map", undefined, "aal1")).status, 403);
+  const r = await api("admin", "GET", "/map", undefined, "aal2");
+  assert.equal(r.status, 200);
+  assert.ok(r.json.counts.tenants && typeof r.json.counts.audit7d === "number");
+  assert.equal(r.json.keys.google, true);
+  const text = JSON.stringify(r.json);
+  for (const leak of ["gsecret", "platform-token", "mark@a.example", "Jo Bloggs", "kitchen floor"]) assert.ok(!text.includes(leak), leak);
+});
+
 test("the setup checklist shows what a business still needs, scoped to that business", async () => {
   const r = await api("ownerA", "GET", `/businesses/${A}/setup`);
   assert.equal(r.status, 200);

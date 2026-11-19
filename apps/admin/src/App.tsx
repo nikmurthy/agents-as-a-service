@@ -15,6 +15,7 @@ import { Activity, RunDetail } from "./pages/Activity";
 import { DataRequests } from "./pages/DataRequests";
 import { Agents } from "./pages/Agents";
 import { Platform } from "./pages/Platform";
+import { WorkforceMap } from "./pages/Map";
 
 export interface Me {
   email: string;
@@ -73,6 +74,7 @@ function Signed() {
         <Route index element={<Home me={me} />} />
         <Route path="agents" element={<Agents />} />
         <Route path="platform" element={<Platform />} />
+        <Route path="map" element={<WorkforceMap />} />
         <Route path="b/:id" element={<BusinessFrame me={me} />}>
           <Route index element={<Overview />} />
           <Route path="inbox" element={<Inbox />} />
@@ -103,6 +105,7 @@ function Shell({ me }: { me: Me }) {
     <div className="shell">
       <header className="top">
         <NavLink to="/" className="brand">Admin</NavLink>
+        {me.isAdmin && <NavLink to="/map">Map</NavLink>}
         {me.isAdmin && <NavLink to="/agents">Agents</NavLink>}
         {me.isAdmin && <NavLink to="/platform">Keys</NavLink>}
         <span className="spacer" />
