@@ -217,6 +217,48 @@ test("a platform admin sees every business, but only after two-factor", async ()
   assert.equal(audited.actor, `admin:${USERS.admin.email}`);
 });
 
+test("the agents page explains every agent with its instructions and running cost", async () => {
+  const r = await api("admin", "GET", "/agents", undefined, "aal2");
+  const ids = r.json.agents.map((a: any) => a.id).sort();
+  assert.deepEqual(ids, ["booking", "drafting", "reviewer", "triage"]);
+  for (const a of r.json.agents) {
+    assert.ok(a.instructions.length > 50 && a.model && a.version, a.id);
+    assert.ok("perRunUsd" in a.usage);
+  }
+  assert.equal((await api("ownerA", "GET", "/agents")).status, 403);
+});
+
+test("platform keys: admins see only whether each is set, and can test them; values never leave the server", async () => {
+  assert.equal((await api("ownerA", "GET", "/platform/status")).status, 403);
+  assert.equal((await api("admin", "GET", "/platform/status", undefined, "aal1")).status, 403);
+  assert.equal((await api("ownerA", "POST", "/platform/test/google")).status, 403);
+  const s = await api("admin", "GET", "/platform/status", undefined, "aal2");
+  const text = JSON.stringify(s.json);
+  for (const secret of ["gsecret", "platform-token", "test-app-secret", "verify-me"]) assert.ok(!text.includes(secret), secret);
+  const claude = s.json.services.find((x: any) => x.id === "claude");
+  assert.equal(claude.ready, false, "no Claude key in tests");
+  assert.equal(s.json.services.find((x: any) => x.id === "google").ready, true);
+
+  const g = await api("admin", "POST", "/platform/test/google", undefined, "aal2");
+  assert.equal(g.json.ok, true);
+  const c = await api("admin", "POST", "/platform/test/claude", undefined, "aal2");
+  assert.equal(c.json.ok, false);
+  assert.match(c.json.detail, /ANTHROPIC_API_KEY/);
+  assert.equal((await api("admin", "POST", "/platform/test/nope", undefined, "aal2")).status, 400);
+  const logged = await withAdmin((db) => one<any>(db, "select detail from audit_log where action = 'platform.key_tested' and entity_id = 'google' order by id desc limit 1"));
+  assert.deepEqual(logged.detail, { ok: true });
+});
+
+test("the setup checklist shows what a business still needs, scoped to that business", async () => {
+  const r = await api("ownerA", "GET", `/businesses/${A}/setup`);
+  assert.equal(r.status, 200);
+  const step = (k: string) => r.json.steps.find((x: any) => x.key === k);
+  assert.equal(step("claude").done, false);
+  assert.equal(step("approver").done, true);
+  assert.equal(r.json.complete, false);
+  assert.equal((await api("ownerA", "GET", `/businesses/${B}/setup`)).status, 404);
+});
+
 test("a replaced WhatsApp token is stored encrypted and never returned", async () => {
   const r = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "99887766", accessToken: "brand-new-secret-token" });
   assert.equal(r.status, 200);

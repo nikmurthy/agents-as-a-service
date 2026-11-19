@@ -7,7 +7,7 @@ import { mockAgent } from "./mock.js";
 import { utcToLocal } from "../time.js";
 
 let client: Anthropic | undefined;
-const anthropic = () => (client ??= new Anthropic({ apiKey: env.anthropicApiKey }));
+export const anthropic = () => (client ??= new Anthropic({ apiKey: env.anthropicApiKey }));
 /** Tests only: swap in a fake client. */
 export function setAnthropicClientForTests(c: Anthropic | undefined) { client = c; }
 

@@ -7,6 +7,8 @@ export interface WhatsAppClient {
   sendButtons(from: WaSender, to: string, body: string, buttons: { id: string; title: string }[]): Promise<{ id: string }>;
   /** Pre-approved template: works outside the 24-hour window. Quick-reply payloads come back as button replies. */
   sendTemplate(from: WaSender, to: string, name: string, lang: string, bodyParams: string[], quickReplyPayloads: string[]): Promise<{ id: string }>;
+  /** Looks the number up with Meta using its token. Sends nothing. */
+  checkSender(from: WaSender): Promise<{ ok: boolean; detail: string }>;
 }
 
 const toWa = (e164: string) => e164.replace(/^\+/, "");
@@ -23,6 +25,14 @@ async function graph(from: WaSender, payload: Record<string, unknown>): Promise<
 }
 
 export const whatsAppCloud: WhatsAppClient = {
+  async checkSender(from) {
+    const res = await fetch(`https://graph.facebook.com/${env.graphApiVersion}/${from.phoneNumberId}?fields=display_phone_number,verified_name`, {
+      headers: { Authorization: `Bearer ${from.accessToken}` },
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, detail: `Meta said: ${json?.error?.message ?? res.status}` };
+    return { ok: true, detail: `Sending as ${json.verified_name ?? "your business"} (${json.display_phone_number ?? from.phoneNumberId}).` };
+  },
   sendText: (from, to, text) => graph(from, { to: toWa(to), type: "text", text: { body: text.slice(0, 4096), preview_url: false } }),
   sendButtons: (from, to, body, buttons) =>
     graph(from, {

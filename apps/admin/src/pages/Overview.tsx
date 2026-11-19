@@ -1,10 +1,11 @@
 import { Link } from "react-router-dom";
 import { get, put } from "../api";
 import { useBiz } from "../ctx";
+import { SetupChecklist } from "./Setup";
 import { Card, Empty, ErrorNote, Loading, Page, useAction, useLoad, when } from "../ui";
 
 export function Overview() {
-  const { id, business, canManage } = useBiz();
+  const { id, business, canManage, isAdmin } = useBiz();
   const { data, error } = useLoad(() => get(`/businesses/${id}`), [id]);
   const pause = useAction();
   if (error) return <ErrorNote message={error} />;
@@ -14,6 +15,7 @@ export function Overview() {
   const paused = business.status === "paused";
   return (
     <Page title="Overview">
+      <SetupChecklist />
       <div className="stats">
         <Stat label="Messages in today" value={n.messages_today} />
         <Stat label="Replies waiting for you" value={n.drafts_waiting} to={`/b/${id}/inbox?waiting=1`} />
@@ -28,7 +30,16 @@ export function Overview() {
         {a.brokenConnections.map((c: any) => <Item key={c.id} to={`/b/${id}/connections`} text={`${c.kind.replace("_", " ")} connection problem: ${c.last_error ?? "unknown error"}`} bad />)}
         {a.failedRuns.map((r: any) => <Item key={r.id} to={`/b/${id}/activity/${r.id}`} text="A message couldn't be processed" at={r.created_at} bad />)}
       </Card>
-      {canManage && business.status !== "closed" && (
+      {business.status === "onboarding" && (
+        <Card title="Switch on">
+          <p className="muted">This business is still being set up, so nothing is drafted yet. Switch it on once the checklist above is done.</p>
+          <ErrorNote message={pause.error} />
+          {isAdmin
+            ? <button className="primary" disabled={pause.busy} onClick={() => pause.run(async () => { await put(`/businesses/${id}/status`, { status: "active" }); location.reload(); })}>Switch on</button>
+            : <p className="note">The platform team switches new businesses on.</p>}
+        </Card>
+      )}
+      {canManage && (business.status === "active" || business.status === "paused") && (
         <Card title={paused ? "Paused" : "Pause this business"}>
           <p className="muted">{paused ? "Messages are being kept but no replies are drafted." : "Stops drafting replies. Incoming messages are kept and nothing is lost."}</p>
           <ErrorNote message={pause.error} />

@@ -10,6 +10,7 @@ export function fakeGoogle() {
   const inbox: { id: string; historyId: number; msg: any }[] = [];
   const sent: { raw: string; threadId?: string }[] = [];
   const client: GoogleClient = {
+    checkClient: async () => ({ ok: true, detail: "Google accepted the client ID and secret." }),
     authUrl: (state, redirect) => `https://accounts.google.example/auth?state=${encodeURIComponent(state)}&redirect_uri=${encodeURIComponent(redirect)}`,
     exchangeCode: async () => ({ access_token: "access-1", refresh_token: "refresh-1", expires_at: Date.now() + 3600_000 }),
     refresh: async (t: GoogleTokens) => ({ ...t, access_token: `access-${++n}`, expires_at: Date.now() + 3600_000 }),
@@ -36,6 +37,7 @@ export function fakeWhatsApp() {
   const sent: { kind: "text" | "buttons" | "template"; from: string; to: string; text: string; buttons?: string[] }[] = [];
   let n = 0;
   const client: WhatsAppClient = {
+    checkSender: async (from) => ({ ok: true, detail: `Sending as Test (${from.phoneNumberId}).` }),
     sendText: async (from, to, text) => { sent.push({ kind: "text", from: from.phoneNumberId, to, text }); return { id: `wamid.${++n}` }; },
     sendButtons: async (from, to, body, buttons) => { sent.push({ kind: "buttons", from: from.phoneNumberId, to, text: body, buttons: buttons.map((b) => b.id) }); return { id: `wamid.${++n}` }; },
     sendTemplate: async (from, to, _name, _lang, params, payloads) => { sent.push({ kind: "template", from: from.phoneNumberId, to, text: params.join(" | "), buttons: payloads }); return { id: `wamid.${++n}` }; },
