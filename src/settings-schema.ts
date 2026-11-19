@@ -4,7 +4,7 @@ const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a 24-hour time l
 const minutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
 
 const replyRoute = z.enum(["whatsapp", "email", "checkatrade_message", "sms", "phone"]);
-const channel = z.enum(["email", "whatsapp", "web_form", "checkatrade"]);
+const channel = z.enum(["email", "whatsapp", "web_form", "checkatrade", "sms"]);
 
 const timezone = z.string().refine((tz) => {
   try { new Intl.DateTimeFormat("en-GB", { timeZone: tz }); return true; } catch { return false; }

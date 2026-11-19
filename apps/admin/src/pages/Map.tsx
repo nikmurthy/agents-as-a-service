@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { get } from "../api";
 import { ErrorNote, Loading, useLoad } from "../ui";
@@ -9,7 +10,7 @@ type Kind = "use" | "ready" | "limited" | "pack" | "core" | "infra" | "later";
 type State = "live" | "built" | "different" | "todo" | "parked" | "offline";
 type Counts = any;
 interface Data { counts: Counts; keys: { claude: boolean; google: boolean; whatsapp: boolean }; agentMode: string }
-interface Chip { name: string; sub?: string; kind: Kind; tag?: string; uses?: string; wide?: boolean; live: (d: Data) => [State, string] }
+interface Chip { name: string; sub?: string; kind: Kind; tag?: string; uses?: string; wide?: boolean; more?: string[]; live: (d: Data) => [State, string] }
 interface Layer { title: string; note?: string; serves?: string; one?: boolean; chips: Chip[] }
 
 const KIND_LABEL: Record<Kind, string> = {
@@ -88,7 +89,10 @@ const COLUMNS: { title: string; sub: string; flow?: boolean; layers: Layer[] }[]
         { name: "WhatsApp", sub: "Own number, coexistence", kind: "ready", live: (d) => !d.keys.whatsapp ? ["built", "Built. Waiting for the platform's WhatsApp keys"] : conn("whatsapp", "number")(d) },
         { name: "Web forms", sub: "Wix, Shopify", kind: "ready", live: conn("web_form", "form") },
         { name: "Social DMs", sub: "Instagram, Facebook", kind: "ready", live: todo() },
-        { name: "SMS", sub: "Outbound only; inbound needs a dedicated line", kind: "limited", live: todo() },
+        { name: "SMS", sub: "Texts read from Messages on the business's Mac", kind: "limited", tag: "New",
+          more: ["Their iPhone forwards texts to their Mac. A small relay there sends each new text from a real phone number here, about every 30 seconds.",
+            "Skips iMessages, bank codes and delivery alerts, and never sends old texts.", "The Mac has to be on. Replies are approved as usual, then the owner texts the wording."],
+          live: conn("sms_relay", "Mac relay") },
         { name: "Lead-site alerts", sub: "Checkatrade", kind: "ready", tag: "Added", live: conn("checkatrade_webhook", "Checkatrade link") },
       ] },
       { title: "Unified inbox", note: "Chatwoot or Respond.io", chips: [
@@ -105,12 +109,21 @@ const COLUMNS: { title: string; sub: string; flow?: boolean; layers: Layer[] }[]
         { name: "Regulation watcher", sub: "Rule changes and what they mean", kind: "core", live: todo() },
       ] },
       { title: "Industry packs", note: "Tools, knowledge and rules per sector", chips: [
-        { name: "Practitioners", sub: "Cliniko, Halaxy · clinical guardrails", kind: "pack", live: ({ counts: c }) => n(c.packs, "practitioner") ? ["live", `Guardrails written, ${biz(n(c.packs, "practitioner"))}. Cliniko and Halaxy not connected`] : ["built", "Guardrails written. Cliniko and Halaxy not connected"] },
-        { name: "Trades", sub: "Tradify, Jobber · quotes, job routing", kind: "pack", live: ({ counts: c }) => n(c.packs, "trades", "flooring") ? ["live", `${biz(n(c.packs, "trades", "flooring"))}. Tradify and Jobber not connected`] : ["built", "Trades and flooring packs written. Tradify and Jobber not connected"] },
-        { name: "Beauty", sub: "Fresha, Phorest · rebooking, no-shows", kind: "pack", live: later() },
-        { name: "Hospitality", sub: "ResDiary · table bookings", kind: "pack", live: later() },
-        { name: "HR and recruitment", sub: "Bullhorn, Vincere, Workable", kind: "pack", live: later() },
-        { name: "Family automation", sub: "Parent-led, children's data rules", kind: "pack", live: later() },
+        { name: "Practitioners", sub: "Cliniko, Halaxy · clinical guardrails", kind: "pack",
+          more: ["Never gives personal clinical, diet or supplement advice by message: those questions are routed to the practitioner for a consultation.",
+            "Emergencies get 999 or NHS 111 and go straight to the practitioner. Eating disorders, self-harm or distress get a personal reply, never a sales one.",
+            "General questions (what a consultation involves, online sessions, fees policy) are answered. Prices only from the business's own list.",
+            "Health details are tagged as special category data and kept out of notes and logs.", "Offers first consultations to new clients and follow-ups to existing ones, only at real free times."], live: ({ counts: c }) => n(c.packs, "practitioner") ? ["live", `Guardrails written, ${biz(n(c.packs, "practitioner"))}. Cliniko and Halaxy not connected`] : ["built", "Guardrails written. Cliniko and Halaxy not connected"] },
+        { name: "Trades", sub: "Tradify, Jobber · quotes, job routing", kind: "pack",
+          more: ["Gas smells and carbon monoxide: tells them to get out and call 0800 111 999, never books a routine visit, alerts the owner at once.",
+            "Burst pipes and leaks near electrics are urgent; no heating or hot water is high priority, more so with elderly people or babies at home.",
+            "Never quotes a fixed price for an unseen job. Checks the postcode is in the service area. Complaints and disputes go to the owner.",
+            "Flooring has its own version: price ranges as a guide only, asks for what's missing to quote, warns not to lift old tiles that may contain asbestos.",
+            "Checkatrade leads have gone to several firms, so it replies fast with specific times."], live: ({ counts: c }) => n(c.packs, "trades", "flooring") ? ["live", `${biz(n(c.packs, "trades", "flooring"))}. Tradify and Jobber not connected`] : ["built", "Trades and flooring packs written. Tradify and Jobber not connected"] },
+        { more: ["Would rebook regulars, fill gaps from no-shows and answer treatment questions, with patch-test rules."], name: "Beauty", sub: "Fresha, Phorest · rebooking, no-shows", kind: "pack", live: later() },
+        { more: ["Would take table bookings and answer menu and allergy questions, never guessing allergens."], name: "Hospitality", sub: "ResDiary · table bookings", kind: "pack", live: later() },
+        { more: ["Would source and screen candidates and schedule interviews, with fair-hiring rules."], name: "HR and recruitment", sub: "Bullhorn, Vincere, Workable", kind: "pack", live: later() },
+        { more: ["Would run family calendars, school admin and meal plans through the parent, with the strictest children's data settings."], name: "Family automation", sub: "Parent-led, children's data rules", kind: "pack", live: later() },
       ] },
       { title: "Outbound channels", chips: [
         { name: "Replies", sub: "Back through the channel the customer used", kind: "ready", tag: "Added", live: ({ counts: c }) => n(c.drafts, "sent") ? ["live", `${plural(n(c.drafts, "sent"), "reply", "replies")} sent this week`] : ["built", "Nothing sent yet"] },
@@ -166,6 +179,13 @@ const COLUMNS: { title: string; sub: string; flow?: boolean; layers: Layer[] }[]
         { name: "Learner progress", sub: "Curricula, what's covered, what's due", kind: "later", live: later() },
       ] },
       { title: "Human review interface", serves: "the unified inbox and spot checks", chips: [
+        { name: "Owner's WhatsApp", sub: "Each draft arrives as a WhatsApp message with Approve, Edit and Reject buttons", kind: "core", tag: "Added", wide: true,
+          more: ["The platform's own WhatsApp number sends the owner each draft: who it's from, what they asked, and the reply we'd send.",
+            "Approve sends it through the customer's own channel. Edit lets the owner change the wording first. Reject drops it.",
+            "Anything flagged (clinical, complaints, emergencies) arrives with a warning at the top.",
+            "Nothing reaches a customer without a yes. The Inbox page here does the same job from a browser."],
+          live: ({ keys, counts: c }) => !keys.whatsapp ? ["built", "Built. Waiting for the platform's WhatsApp keys; the Inbox page works meanwhile"]
+            : c.approvers ? ["live", `${plural(c.approvers, "approver")} on WhatsApp`] : ["built", "Keys set. No approver has a WhatsApp number yet"] },
         { name: "Chatwoot, self-hosted", sub: "One inbox per client; drafts appear as notes to approve", kind: "later", wide: true, live: ({ keys }) => ["different", keys.whatsapp ? "Drafts go to the owner on WhatsApp and to the Inbox page here" : "Inbox page here. WhatsApp approvals once the keys are in"] },
       ] },
       { title: "Observability and quality", serves: "the reviewer agent and audit", chips: [
@@ -194,13 +214,23 @@ const COLUMNS: { title: string; sub: string; flow?: boolean; layers: Layer[] }[]
   },
 ];
 
+type View = "all" | "current" | "future";
+const FUTURE: State[] = ["todo", "parked"];
+const VIEWS: [View, string, string][] = [
+  ["all", "Everything", "The whole map"],
+  ["current", "Current", "Running, built, built differently, or kept as documents"],
+  ["future", "Future", "Not built yet, or later"],
+];
+const inView = (v: View, s: State) => v === "all" || (v === "future") === FUTURE.includes(s);
+
 export function WorkforceMap() {
   const { data, error } = useLoad<Data>(() => get("/map"), []);
+  const [view, setView] = useState<View>("all");
   if (error) return <ErrorNote message={error} />;
   if (!data) return <Loading />;
   const c = data.counts;
   const flow = [
-    { cls: "ready", title: "Lead arrives", body: "Gmail, WhatsApp, web form, Checkatrade", stat: sum(c.messagesIn), unit: "messages" },
+    { cls: "ready", title: "Lead arrives", body: "Gmail, WhatsApp, texts, web form, Checkatrade", stat: sum(c.messagesIn), unit: "messages" },
     { cls: "core", title: "Agents read it", body: "Triage with the pack and the business's own prices", stat: sum(c.runs), unit: "handled" },
     { cls: "ready", title: "Checks the diary", body: "Free times from Google Calendar, held", stat: sum(c.holds), unit: "times offered" },
     { cls: "core", title: "Draft to the owner", body: "On WhatsApp, or the Inbox here", stat: sum(c.drafts), unit: "drafts" },
@@ -236,24 +266,35 @@ export function WorkforceMap() {
         <p className="muted small">Green steps use other people's systems; purple steps are ours, and they're the product. {!sum(c.messagesIn) && <>Nothing has come through yet: <Link to="/">connect a business</Link> and send a test enquiry to watch it light up.</>}</p>
       </div>
 
+      <div className="map-tools">
+        <div className="seg" role="group" aria-label="Show">
+          {VIEWS.map(([v, label, hint]) => (
+            <button key={v} type="button" title={hint} aria-pressed={view === v} className={view === v ? "on" : ""} onClick={() => setView(v)}>
+              {label} <span className="muted">({v === "all" ? all.length : all.filter((s) => inView(v, s)).length})</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="mcols">
         {COLUMNS.map((col) => (
           <div key={col.title} className="mcol">
             <div className="mcolhead"><h2>{col.title}</h2><p>{col.sub}</p></div>
-            {col.layers.map((l, i) => (
+            {col.layers.map((l) => ({ l, chips: l.chips.filter((ch) => inView(view, ch.live(data)[0])) })).filter((x) => x.chips.length).map(({ l, chips }, i) => (
               <div key={l.title}>
                 {i > 0 && <div className={col.flow ? "marrow" : "mgap"} aria-hidden />}
                 <div className="mlayer">
                   <h3>{l.title}{l.note && <small>{l.note}</small>}</h3>
                   {l.serves && <p className="serves">Supports <b>{l.serves}</b></p>}
                   <div className={`mgrid${l.one ? " one" : ""}`}>
-                    {l.chips.map((ch) => { const [st, text] = ch.live(data); return (
+                    {chips.map((ch) => { const [st, text] = ch.live(data); return (
                       <div key={ch.name} className={`mchip ${ch.kind}${ch.wide ? " wide" : ""}${st === "parked" ? " dim" : ""}`}>
                         {ch.tag && <span className="tag">{ch.tag}</span>}
                         <b>{ch.name}</b>
                         {ch.sub && <span>{ch.sub}</span>}
                         {ch.uses && <span className="uses">Uses: {ch.uses}</span>}
                         <span className="now" title={STATE_LABEL[st]}><i className={`dot ${st}`} />{text}</span>
+                        {ch.more && <details className="more"><summary>{ch.kind === "pack" ? "What's in this pack" : "How it works"}</summary><ul>{ch.more.map((m) => <li key={m}>{m}</li>)}</ul></details>}
                       </div>
                     ); })}
                   </div>
@@ -266,7 +307,7 @@ export function WorkforceMap() {
       <div className="mnotes">
         <p><b>The pilot is "Answer enquiries".</b> It needs the blue infrastructure in its simplest form. Chatwoot and billing are skipped for now, and every record carries the business it belongs to from day one.</p>
         <p><b>Where the build differs from the map:</b> our own Inbox page and WhatsApp approvals instead of Chatwoot, a job queue inside the database instead of Inngest, direct Google and WhatsApp sign-in instead of a connector service, and our own run tracing instead of Langfuse. Each is smaller and cheaper for 2 or 3 businesses, and can be swapped later.</p>
-        <p><b>Blocks marked "Added"</b> aren't on the original map but are built: chasing quotes, Checkatrade lead alerts and sending replies back through the customer's own channel.</p>
+        <p><b>Blocks marked "Added"</b> aren't on the original map but are built: chasing quotes, Checkatrade lead alerts, approvals on the owner's WhatsApp and sending replies back through the customer's own channel.</p>
         <p><b>Not yet on the map: phone calls.</b> Most competitors start with voice, so it belongs here eventually.</p>
       </div>
     </section>

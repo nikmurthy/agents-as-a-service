@@ -14,7 +14,7 @@ import type { WaInbound } from "./channels/parse.js";
 const ROUTE_LABEL: Record<string, string> = {
   whatsapp: "WhatsApp", email: "email", checkatrade_message: "Checkatrade (you paste it in)", sms: "text (you send it)", phone: "phone call",
 };
-const CHANNEL_LABEL: Record<string, string> = { email: "Email", whatsapp: "WhatsApp", web_form: "Website form", checkatrade: "Checkatrade" };
+const CHANNEL_LABEL: Record<string, string> = { email: "Email", whatsapp: "WhatsApp", web_form: "Website form", checkatrade: "Checkatrade", sms: "Text" };
 
 export async function sendApproval(tenantId: string, draftId: string): Promise<void> {
   await withTenantSession(tenantId, async (db) => {

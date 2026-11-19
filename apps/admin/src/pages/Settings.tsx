@@ -5,7 +5,7 @@ import { Card, ErrorNote, Field, Loading, Page, useAction, useLoad } from "../ui
 
 const KNOWN = ["tone", "signOff", "timezone", "services", "priceGuide", "replyGuidance", "replyVia", "workingHours", "serviceArea", "escalationName",
   "spotCheckEvery", "reviewerPassScore", "checkatradeSenders", "retentionDays"];
-const CHANNELS: [string, string][] = [["email", "Email enquiries"], ["whatsapp", "WhatsApp enquiries"], ["web_form", "Website form"], ["checkatrade", "Checkatrade"]];
+const CHANNELS: [string, string][] = [["email", "Email enquiries"], ["whatsapp", "WhatsApp enquiries"], ["web_form", "Website form"], ["checkatrade", "Checkatrade"], ["sms", "Text messages"]];
 const ROUTES: [string, string][] = [["whatsapp", "WhatsApp"], ["email", "Email"], ["checkatrade_message", "Checkatrade message"], ["sms", "Text"], ["phone", "Phone call"]];
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 

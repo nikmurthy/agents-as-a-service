@@ -168,3 +168,8 @@ pre.instructions { white-space: pre-wrap; background: #f8f9fb; border: 1px solid
 .marrow { height: 1.4rem; display: flex; justify-content: center; } .marrow::before { content: ""; width: 1px; height: 100%; background: var(--line); }
 .mgap { height: .9rem; }
 .mnotes { display: grid; gap: .6rem; margin-top: 1.5rem; max-width: 90ch; font-size: .9rem; color: var(--muted); } .mnotes p { margin: 0; } .mnotes b { color: var(--text); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--card); }
+.seg button { border: 0; border-radius: 0; background: transparent; color: var(--text); padding: .35rem .8rem; font-size: .85rem; }
+.seg button + button { border-left: 1px solid var(--line); } .seg button.on { background: var(--text); color: var(--card); } .seg button.on .muted { color: inherit; opacity: .75; }
+.mchip .more { margin-top: .3rem; color: var(--text); font-size: .8rem; } .mchip .more summary { cursor: pointer; color: inherit; opacity: .85; }
+.mchip .more ul { margin: .35rem 0 0; padding-left: 1.05rem; display: grid; gap: .25rem; }

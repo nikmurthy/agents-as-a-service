@@ -3,7 +3,7 @@ import { get, post } from "../api";
 import { useBiz } from "../ctx";
 import { Card, Empty, ErrorNote, Field, Loading, Page, Status, useAction, useLoad, when } from "../ui";
 
-const KIND: Record<string, string> = { gmail: "Gmail", google_calendar: "Google Calendar", whatsapp: "WhatsApp number", web_form: "Website form link", checkatrade_webhook: "Checkatrade leads link" };
+const KIND: Record<string, string> = { gmail: "Gmail", google_calendar: "Google Calendar", whatsapp: "WhatsApp number", web_form: "Website form link", checkatrade_webhook: "Checkatrade leads link", sms_relay: "Text messages from a Mac" };
 
 export function Connections() {
   const { id, canManage } = useBiz();
@@ -39,11 +39,13 @@ export function Connections() {
           {google && <p><code className="wrap">{google}</code> <button type="button" onClick={() => navigator.clipboard.writeText(google)}>Copy</button></p>}
         </Card>
         <WhatsApp id={id} onDone={reload} />
-        <Card title="Add a link for a website form or Checkatrade">
+        <Card title="Add a link for a website form, Checkatrade or texts">
           <div className="buttons">
             <button disabled={act.busy} onClick={() => act.run(async () => { await post(`/businesses/${id}/connections/webhook`, { kind: "web_form" }); reload(); })}>Website form</button>
             <button disabled={act.busy} onClick={() => act.run(async () => { await post(`/businesses/${id}/connections/webhook`, { kind: "checkatrade_webhook" }); reload(); })}>Checkatrade</button>
+            <button disabled={act.busy} onClick={() => act.run(async () => { await post(`/businesses/${id}/connections/webhook`, { kind: "sms_relay" }); reload(); })}>Text messages from a Mac</button>
           </div>
+          <p className="muted small">Texts from a Mac: the business's iPhone forwards texts to their Mac, and a small relay there sends new ones here. Give them the link and the steps in <code>tools/mac-sms-relay/README.md</code>.</p>
         </Card>
       </>)}
       {data.connections.some((c: any) => c.status === "disconnected") && <p className="muted small">Disconnected items are hidden. Last change {when(data.connections.at(-1)?.created_at)}.</p>}

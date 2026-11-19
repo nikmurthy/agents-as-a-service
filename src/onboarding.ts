@@ -61,13 +61,16 @@ export async function connectWhatsApp(tenantId: string, phoneNumberId: string, a
   });
 }
 
-export async function addWebhook(tenantId: string, kind: "web_form" | "checkatrade_webhook", label?: string, by = "admin") {
+export const HOOK_PATH = { web_form: "forms", checkatrade_webhook: "checkatrade", sms_relay: "sms" } as const;
+export type HookKind = keyof typeof HOOK_PATH;
+
+export async function addWebhook(tenantId: string, kind: HookKind, label?: string, by = "admin") {
   const token = randomToken();
   await withTenant(tenantId, async (db) => {
     await db.query("insert into channel_connections (tenant_id, kind, external_id, label) values (app_current_tenant(), $1, $2, $3)", [kind, token, label ?? null]);
     await audit(db, { tenantId, actor: by, action: `${kind}.added` });
   });
-  return `${env.publicBaseUrl}/webhooks/${kind === "web_form" ? "forms" : "checkatrade"}/${token}`;
+  return `${env.publicBaseUrl}/webhooks/${HOOK_PATH[kind]}/${token}`;
 }
 
 export async function setTenantStatus(tenantId: string, status: "active" | "paused") {

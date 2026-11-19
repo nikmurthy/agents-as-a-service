@@ -1,4 +1,4 @@
-export type ChannelKind = "email" | "whatsapp" | "web_form" | "checkatrade";
+export type ChannelKind = "email" | "whatsapp" | "web_form" | "checkatrade" | "sms";
 export type ReplyRoute = "whatsapp" | "email" | "checkatrade_message" | "sms" | "phone";
 export type DataTag = "personal" | "health" | "child";
 
