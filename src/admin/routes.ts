@@ -524,6 +524,35 @@ admin.get("/agents", async (c) => {
   }));
 });
 
+// ---------------------------------------------------------------- live workforce map (platform admin)
+// Platform-wide counts only (a sweep across businesses): no names, message text or contact details.
+admin.get("/map", async (c) => {
+  requireAdmin(c);
+  const counts = await withAdmin(async (db) => {
+    const kv = async (sql: string) => Object.fromEntries((await many<{ k: string; n: number }>(db, sql)).map((r) => [r.k, r.n]));
+    return {
+      tenants: await kv("select status as k, count(*)::int as n from tenants group by status"),
+      packs: await kv("select pack as k, count(*)::int as n from tenants where status <> 'closed' group by pack"),
+      useCases: await kv("select u.use_case as k, count(*)::int as n from tenant_use_cases u join tenants t on t.id = u.tenant_id where u.enabled and t.status = 'active' group by u.use_case"),
+      connections: await kv("select kind as k, count(*)::int as n from channel_connections where status = 'active' group by kind"),
+      brokenConnections: (await one<{ n: number }>(db, "select count(*)::int as n from channel_connections where status = 'error'"))!.n,
+      messagesIn: await kv("select channel as k, count(*)::int as n from messages where direction = 'in' and received_at > now() - interval '7 days' group by channel"),
+      runs: await kv("select coalesce(outcome, status) as k, count(*)::int as n from runs where created_at > now() - interval '7 days' group by 1"),
+      agentCalls: await kv("select agent as k, count(*)::int as n from run_events where agent is not null and at > now() - interval '7 days' group by agent"),
+      drafts: await kv("select status as k, count(*)::int as n from drafts where created_at > now() - interval '7 days' group by status"),
+      edited: (await one<{ n: number }>(db, "select count(*)::int as n from drafts where status = 'sent' and body <> original_body and created_at > now() - interval '7 days'"))!.n,
+      holds: await kv("select status as k, count(*)::int as n from holds where created_at > now() - interval '7 days' group by status"),
+      approvers: (await one<{ n: number }>(db, "select count(*)::int as n from tenant_members where is_approver and whatsapp_phone is not null"))!.n,
+      dataRequests: (await one<{ n: number }>(db, "select count(*)::int as n from data_requests"))!.n,
+      suppressed: (await one<{ n: number }>(db, "select count(*)::int as n from suppression"))!.n,
+      audit7d: (await one<{ n: number }>(db, "select count(*)::int as n from audit_log where at > now() - interval '7 days'"))!.n,
+      retentionRuns: (await one<{ n: number }>(db, "select count(*)::int as n from audit_log where action = 'retention.applied'"))!.n,
+      agentVersions: await kv("select agent_key as k, count(*)::int as n from agent_definitions group by agent_key"),
+    };
+  });
+  return c.json({ counts, keys: servicesReady(), agentMode: env.agentMode });
+});
+
 // ---------------------------------------------------------------- platform keys (platform admin). Status only: values are never returned.
 admin.get("/platform/status", (c) => {
   requireAdmin(c);
