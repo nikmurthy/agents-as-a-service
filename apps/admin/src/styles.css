@@ -147,3 +147,24 @@ pre.instructions { white-space: pre-wrap; background: #f8f9fb; border: 1px solid
 .mchip.build { background: var(--keep-bg); color: var(--keep); } .mchip.rent { background: var(--buy-bg); color: var(--buy); } .mchip.plug { background: var(--plug-bg); color: var(--plug); }
 .mchip.new { background: var(--new-bg); color: var(--new); outline: 2px dashed currentColor; outline-offset: -2px; }
 .mchip.park { background: var(--park-bg); color: var(--park); } .mchip.park .now { color: var(--muted); }
+
+/* Map blocks: colours follow the workforce map (use case, ready, limited, pack, core, infrastructure, later). */
+.map { --use:#7a2e6b; --use-bg:#f6e8f2; --ready:#0f6e56; --ready-bg:#e1f5ee; --limited:#8a520b; --limited-bg:#faeeda; --pack:#9a3d1e; --pack-bg:#faece7;
+  --core:#4b44a8; --core-bg:#eeedfb; --infra:#1f5f8b; --infra-bg:#e3eff8; --later:#55605b; --later-bg:#eef0ee; }
+.sw.use { background: var(--use-bg); border: 1px solid var(--use); } .sw.ready { background: var(--ready-bg); border: 1px solid var(--ready); }
+.sw.limited { background: var(--limited-bg); border: 1px solid var(--limited); } .sw.pack { background: var(--pack-bg); border: 1px solid var(--pack); }
+.sw.core { background: var(--core-bg); border: 1px solid var(--core); } .sw.infra { background: var(--infra-bg); border: 1px solid var(--infra); }
+.sw.later { background: var(--later-bg); border: 1px solid var(--later); }
+.mchip.use { background: var(--use-bg); color: var(--use); } .mchip.ready { background: var(--ready-bg); color: var(--ready); }
+.mchip.limited { background: var(--limited-bg); color: var(--limited); } .mchip.pack { background: var(--pack-bg); color: var(--pack); }
+.mchip.core { background: var(--core-bg); color: var(--core); } .mchip.infra { background: var(--infra-bg); color: var(--infra); }
+.mchip.later { background: var(--later-bg); color: var(--later); }
+.mchip.wide { grid-column: 1 / -1; } .mchip.dim { opacity: .62; } .mchip.dim .now { color: var(--muted); }
+.mchip .uses { font-size: .76rem; opacity: .85; margin-top: .25rem; padding-top: .3rem; border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent); }
+.mstep.ready { background: var(--ready-bg); color: var(--ready); } .mstep.core { background: var(--core-bg); color: var(--core); }
+.mgrid.one { grid-template-columns: 1fr; }
+.mcol .mlayer { margin-bottom: 0; }
+.serves { margin: -.3rem 0 0; font-size: .78rem; color: var(--muted); } .serves b { color: var(--text); font-weight: 600; }
+.marrow { height: 1.4rem; display: flex; justify-content: center; } .marrow::before { content: ""; width: 1px; height: 100%; background: var(--line); }
+.mgap { height: .9rem; }
+.mnotes { display: grid; gap: .6rem; margin-top: 1.5rem; max-width: 90ch; font-size: .9rem; color: var(--muted); } .mnotes p { margin: 0; } .mnotes b { color: var(--text); }
