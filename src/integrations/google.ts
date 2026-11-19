@@ -14,6 +14,8 @@ export interface GoogleTokens { access_token: string; refresh_token?: string; ex
 export interface GoogleClient {
   authUrl(state: string, redirectUri: string): string;
   exchangeCode(code: string, redirectUri: string): Promise<GoogleTokens>;
+  /** Checks the platform's client ID and secret with Google, without signing anyone in. */
+  checkClient(redirectUri: string): Promise<{ ok: boolean; detail: string }>;
   refresh(tokens: GoogleTokens): Promise<GoogleTokens>;
   gmailProfile(token: string): Promise<{ emailAddress: string; historyId: string }>;
   gmailNewMessageIds(token: string, startHistoryId: string): Promise<{ ids: string[]; historyId: string }>;
@@ -65,6 +67,19 @@ export const googleRest: GoogleClient = {
     return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
   },
   exchangeCode: (code, redirectUri) => tokenRequest({ grant_type: "authorization_code", code, redirect_uri: redirectUri }),
+  async checkClient(redirectUri) {
+    // A made-up code: Google answers invalid_grant when the client ID and secret are right, invalid_client when they're not.
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: env.googleClientId, client_secret: env.googleClientSecret, grant_type: "authorization_code", code: "platform-check", redirect_uri: redirectUri }),
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (json.error === "invalid_grant") return { ok: true, detail: "Google accepted the client ID and secret." };
+    if (json.error === "invalid_client" || json.error === "unauthorized_client") return { ok: false, detail: "Google didn't accept the client ID or secret." };
+    if (json.error === "redirect_uri_mismatch") return { ok: false, detail: `Add ${redirectUri} as a redirect URI on the Google OAuth client.` };
+    return { ok: false, detail: `Unexpected answer from Google: ${json.error ?? res.status}` };
+  },
   async refresh(tokens) {
     if (!tokens.refresh_token) throw new Error("No refresh token: the business needs to reconnect Google");
     const next = await tokenRequest({ grant_type: "refresh_token", refresh_token: tokens.refresh_token });

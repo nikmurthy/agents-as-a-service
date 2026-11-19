@@ -12,6 +12,9 @@ import { approveDraft, editAndApproveDraft, rejectDraft, type DecisionResult } f
 import { releaseHold } from "../calendar.js";
 import { exportPerson, erasePerson, suppress } from "../data-rights.js";
 import { normaliseEmail, normalisePhone } from "../channels/parse.js";
+import { platformStatus, servicesReady, testService } from "./platform.js";
+import { loadAgents } from "../agents/registry.js";
+import { costUsd } from "../agents/pricing.js";
 
 // Admin web app API. Every route checks who is signed in and whether they may use the business in the URL.
 // Business-scoped routes only touch data through withTenant, so row-level security is the backstop.
@@ -101,6 +104,37 @@ admin.get("/businesses/:id", async (c) => {
     };
     return { business: t, numbers, attention };
   }));
+});
+
+admin.get("/businesses/:id/setup", async (c) => {
+  const { tenantId } = tenantAccess(c, c.req.param("id"));
+  const ready = servicesReady();
+  const t = await withTenant(tenantId, async (db) => ({
+    tenant: await one(db, "select status, settings from tenants where id = app_current_tenant()"),
+    conns: await many<{ kind: string; status: string }>(db, "select kind, status from channel_connections where status <> 'disconnected'"),
+    approvers: await one<{ n: number }>(db, "select count(*)::int as n from tenant_members where is_approver and whatsapp_phone is not null"),
+    useCases: await many<{ use_case: string; enabled: boolean }>(db, "select use_case, enabled from tenant_use_cases"),
+  }));
+  if (!t.tenant) throw notFound();
+  const has = (kind: string) => t.conns.some((x) => x.kind === kind && x.status === "active");
+  const on = (u: string) => t.useCases.some((x) => x.use_case === u && x.enabled);
+  const settings = t.tenant.settings ?? {};
+  const steps = [
+    { key: "claude", done: ready.claude, label: "Claude key is set", why: "The agents can't read or reply without it.", fix: "/platform", admin: true },
+    { key: "details", done: Boolean(settings.services?.length && settings.signOff && settings.tone), label: "Business details filled in",
+      why: "Services, tone and sign-off are what the agents use to reply in your voice.", fix: "settings" },
+    { key: "inbox", done: ["gmail", "whatsapp", "web_form", "checkatrade_webhook"].some(has), label: "Somewhere for enquiries to arrive",
+      why: "Connect Gmail, a WhatsApp number, a website form or Checkatrade.", fix: "connections" },
+    ...(on("book_appointments") ? [{ key: "calendar", done: has("google_calendar"), label: "Google Calendar connected",
+      why: "Booking offers real free times and holds them in this calendar.", fix: "connections" }] : []),
+    { key: "approver", done: (t.approvers?.n ?? 0) > 0, label: "Someone to approve replies",
+      why: "A person with a WhatsApp number who approves every reply before it's sent.", fix: "people" },
+    { key: "whatsapp", done: ready.whatsapp, label: "Platform WhatsApp is set up",
+      why: "Approval requests are sent from the platform's WhatsApp number. Until then, approve in this app's Inbox.", fix: "/platform", admin: true, optional: true },
+    { key: "active", done: t.tenant.status === "active", label: "Business switched on",
+      why: "Nothing is drafted while a business is onboarding or paused.", fix: "" },
+  ];
+  return c.json({ steps, complete: steps.every((x) => x.done || (x as any).optional) });
 });
 
 admin.put("/businesses/:id/status", async (c) => {
@@ -465,8 +499,41 @@ admin.post("/businesses/:id/data/suppress", async (c) => {
 // ---------------------------------------------------------------- agents (platform admin, read-only)
 admin.get("/agents", async (c) => {
   requireAdmin(c);
-  return c.json(await withAdmin(async (db) => ({
-    versions: await many(db, "select agent_key, version, created_at, definition->>'model' as model, definition->>'description' as description from agent_definitions order by agent_key, created_at desc"),
-    pinned: await many(db, "select id, slug, name, settings->'agentVersions' as pinned from tenants order by name"),
-  })));
+  return c.json(await withAdmin(async (db) => {
+    const latest = await loadAgents(db);
+    // Platform-wide totals across businesses: numbers only, no message content.
+    const usage = await many<{ agent: string; model: string; calls: number; runs: number; input: number; output: number }>(db,
+      `select agent, model, count(*)::int as calls, count(distinct run_id)::int as runs,
+              coalesce(sum(input_tokens), 0)::int as input, coalesce(sum(output_tokens), 0)::int as output
+         from run_events where agent is not null and at > now() - interval '30 days' group by agent, model`);
+    const agents = Object.values(latest).map((d) => {
+      const rows = usage.filter((u) => u.agent === d.id);
+      const cost = rows.reduce((sum, u) => sum + (costUsd(u.model, u.input, u.output) ?? 0), 0);
+      const runs = rows.reduce((n, u) => n + u.runs, 0);
+      return {
+        id: d.id, version: d.version, model: d.model, effort: d.effort ?? null, description: d.description,
+        instructions: d.instructions, tools: d.tools, output: d.output.name, maxTokens: d.maxTokens,
+        usage: { runs, costUsd: cost, perRunUsd: runs ? cost / runs : null },
+      };
+    });
+    return {
+      agents,
+      versions: await many(db, "select agent_key, version, created_at, definition->>'model' as model from agent_definitions order by agent_key, created_at desc"),
+      pinned: await many(db, "select id, slug, name, settings->'agentVersions' as pinned from tenants order by name"),
+    };
+  }));
+});
+
+// ---------------------------------------------------------------- platform keys (platform admin). Status only: values are never returned.
+admin.get("/platform/status", (c) => {
+  requireAdmin(c);
+  return c.json(platformStatus());
+});
+
+admin.post("/platform/test/:service", async (c) => {
+  const { email } = requireAdmin(c);
+  const service = z.enum(["claude", "google", "whatsapp"]).parse(c.req.param("service"));
+  const result = await testService(service);
+  await withAdmin((db) => audit(db, { tenantId: null, actor: `admin:${email}`, action: "platform.key_tested", entity: "service", entityId: service, detail: { ok: result.ok } }));
+  return c.json(result);
 });

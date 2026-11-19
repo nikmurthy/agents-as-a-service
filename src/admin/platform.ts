@@ -1,0 +1,65 @@
+import { env } from "../env.js";
+import { clients } from "../integrations/index.js";
+import { anthropic } from "../agents/runner.js";
+import { googleRedirectUri } from "../google-link.js";
+
+// Platform keys live in Bitwarden and reach the app as environment variables (see README, "Deploying to Fly.io").
+// The admin app may only learn whether each one is set and whether it works. Never return a value.
+
+export type Service = "claude" | "google" | "whatsapp";
+
+const SERVICES: { id: Service; name: string; purpose: string; keys: string[]; where: string }[] = [
+  {
+    id: "claude", name: "Claude",
+    purpose: "Every agent (Triage, Booking, Drafting, Reviewer) runs on this one key.",
+    keys: ["ANTHROPIC_API_KEY"],
+    where: "Claude Console → API keys. Spending limit and credit are set there too.",
+  },
+  {
+    id: "google", name: "Google (Gmail and Calendar)",
+    purpose: "Lets each business sign in with Google so we can read enquiries, send approved replies and hold calendar times.",
+    keys: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
+    where: "Google Cloud console → Google Auth Platform → Clients.",
+  },
+  {
+    id: "whatsapp", name: "WhatsApp",
+    purpose: "The platform's own number, which sends owners their approval requests, and the webhook that receives WhatsApp messages.",
+    keys: ["PLATFORM_WA_PHONE_NUMBER_ID", "PLATFORM_WA_TOKEN", "WA_APP_SECRET", "WA_VERIFY_TOKEN"],
+    where: "Meta for Developers → your app → WhatsApp → API setup, and App settings → Basic for the app secret.",
+  },
+];
+
+const isSet = (k: string) => Boolean(process.env[k]?.trim());
+
+export function platformStatus() {
+  return {
+    agentMode: env.agentMode,
+    services: SERVICES.map((s) => ({ ...s, keys: s.keys.map((name) => ({ name, set: isSet(name) })), ready: s.keys.every(isSet) })),
+  };
+}
+
+export const servicesReady = () => Object.fromEntries(SERVICES.map((s) => [s.id, s.keys.every(isSet)])) as Record<Service, boolean>;
+
+/** Makes one small real call with the stored keys. Messages never include a key. */
+export async function testService(id: Service): Promise<{ ok: boolean; detail: string }> {
+  const s = SERVICES.find((x) => x.id === id)!;
+  const missing = s.keys.filter((k) => !isSet(k));
+  if (missing.length) return { ok: false, detail: `Not set yet: ${missing.join(", ")}. Add it in Bitwarden, then run the Deploy production workflow.` };
+  try {
+    if (id === "claude") {
+      // The cheapest real request, so it also catches an empty credit balance (a fraction of a cent).
+      await anthropic().messages.create({ model: "claude-haiku-5-5", max_tokens: 64, messages: [{ role: "user", content: "Reply with OK." }] });
+      return { ok: true, detail: "Claude answered. The key works and there is credit." };
+    }
+    if (id === "google") return await clients.google.checkClient(googleRedirectUri());
+    return await clients.whatsapp.checkSender({ phoneNumberId: env.platformWaPhoneNumberId, accessToken: env.platformWaToken });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    if (id === "claude") {
+      if (e?.status === 401) return { ok: false, detail: "Claude didn't accept the key. Make a new one in the Claude Console." };
+      if (/credit balance/i.test(msg)) return { ok: false, detail: "The key works but there's no credit. Add funds in the Claude Console → Billing." };
+      if (/spend limit|usage limit/i.test(msg)) return { ok: false, detail: "This month's spending limit has been reached. Raise it in the Claude Console → Limits." };
+    }
+    return { ok: false, detail: msg.slice(0, 300) };
+  }
+}
