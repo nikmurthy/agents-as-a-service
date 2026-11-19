@@ -162,6 +162,22 @@ export function waToInbound(w: WaInbound): InboundMessage {
   };
 }
 
+// ---------------------------------------------------------------- Text messages (Mac relay)
+/** One text read from the Messages app on the business's Mac by tools/mac-sms-relay. */
+export function parseSmsRelay(raw: any): InboundMessage {
+  const id = String(raw?.id ?? "").trim();
+  const from = normalisePhone(String(raw?.from ?? ""));
+  if (!id || !from) throw new Error("A text needs an id and the sender's number");
+  const at = new Date(raw.receivedAt ?? Date.now());
+  return {
+    channel: "sms",
+    channelMessageId: id,
+    receivedAt: (isNaN(at.getTime()) ? new Date() : at).toISOString(),
+    from: { name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 100) : undefined, phone: from },
+    text: String(raw.text ?? "").slice(0, 5000),
+  };
+}
+
 // ---------------------------------------------------------------- Website forms
 const pick = (fields: Record<string, string>, ...names: string[]) => {
   for (const [k, v] of Object.entries(fields)) if (names.some((n) => k.toLowerCase().includes(n))) return v;

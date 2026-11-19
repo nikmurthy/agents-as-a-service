@@ -6,7 +6,7 @@ import { audit } from "../audit.js";
 import { env } from "../env.js";
 import { requireUser, requireAdmin, tenantAccess, type Access } from "./auth.js";
 import { newBusinessSchema, tenantSettingsSchema, USE_CASES } from "../settings-schema.js";
-import { addWebhook, connectWhatsApp, createTenant, setTenantStatus } from "../onboarding.js";
+import { addWebhook, connectWhatsApp, createTenant, HOOK_PATH, setTenantStatus, type HookKind } from "../onboarding.js";
 import { googleConnectLink } from "../google-link.js";
 import { approveDraft, editAndApproveDraft, rejectDraft, type DecisionResult } from "../decisions.js";
 import { releaseHold } from "../calendar.js";
@@ -123,7 +123,7 @@ admin.get("/businesses/:id/setup", async (c) => {
     { key: "claude", done: ready.claude, label: "Claude key is set", why: "The agents can't read or reply without it.", fix: "/platform", admin: true },
     { key: "details", done: Boolean(settings.services?.length && settings.signOff && settings.tone), label: "Business details filled in",
       why: "Services, tone and sign-off are what the agents use to reply in your voice.", fix: "settings" },
-    { key: "inbox", done: ["gmail", "whatsapp", "web_form", "checkatrade_webhook"].some(has), label: "Somewhere for enquiries to arrive",
+    { key: "inbox", done: ["gmail", "whatsapp", "web_form", "checkatrade_webhook", "sms_relay"].some(has), label: "Somewhere for enquiries to arrive",
       why: "Connect Gmail, a WhatsApp number, a website form or Checkatrade.", fix: "connections" },
     ...(on("book_appointments") ? [{ key: "calendar", done: has("google_calendar"), label: "Google Calendar connected",
       why: "Booking offers real free times and holds them in this calendar.", fix: "connections" }] : []),
@@ -203,12 +203,12 @@ admin.get("/businesses/:id/connections", async (c) => {
   const rows = await withTenant(tenantId, (db) => many(db,
     "select id, kind, external_id, label, status, last_error, config->>'grant' as account, created_at from channel_connections order by kind, created_at"));
   const connections = rows.map((r) => {
-    const isHook = r.kind === "web_form" || r.kind === "checkatrade_webhook";
+    const isHook = r.kind in HOOK_PATH;
     const { external_id, ...rest } = r;
     return {
       ...rest,
       // The webhook token is the URL, so it is only shown to people who can manage the business.
-      url: isHook && role !== "staff" ? `${env.publicBaseUrl}/webhooks/${r.kind === "web_form" ? "forms" : "checkatrade"}/${external_id}` : undefined,
+      url: isHook && role !== "staff" ? `${env.publicBaseUrl}/webhooks/${HOOK_PATH[r.kind as HookKind]}/${external_id}` : undefined,
       connectedAs: isHook ? undefined : external_id,
     };
   });
@@ -237,7 +237,7 @@ admin.post("/businesses/:id/connections/whatsapp", async (c) => {
 
 admin.post("/businesses/:id/connections/webhook", async (c) => {
   const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
-  const { kind, label } = await parse(c, z.object({ kind: z.enum(["web_form", "checkatrade_webhook"]), label: z.string().trim().max(100).optional() }));
+  const { kind, label } = await parse(c, z.object({ kind: z.enum(["web_form", "checkatrade_webhook", "sms_relay"]), label: z.string().trim().max(100).optional() }));
   const url = await addWebhook(tenantId, kind, label, actor.audit);
   return c.json({ url }, 201);
 });

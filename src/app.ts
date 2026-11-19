@@ -3,7 +3,7 @@ import { env } from "./env.js";
 import { one, withAdmin, withTenant } from "./db.js";
 import { encryptJson, sign, verify, verifyMetaSignature } from "./crypto.js";
 import { clients } from "./integrations/index.js";
-import { parseCheckatradeWebhook, parseWebForm, parseWhatsAppWebhook, waToInbound } from "./channels/parse.js";
+import { parseCheckatradeWebhook, parseSmsRelay, parseWebForm, parseWhatsAppWebhook, waToInbound } from "./channels/parse.js";
 import { ingest } from "./ingest.js";
 import { handleOwnerMessage } from "./approvals.js";
 import { audit } from "./audit.js";
@@ -50,6 +50,23 @@ app.post("/webhooks/forms/:token", async (c) => {
   const body = type.includes("application/json") ? await c.req.json() : Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, String(v)]));
   await ingest(conn.tenant_id, parseWebForm(body));
   return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------- Text messages from a Mac (tools/mac-sms-relay)
+// The relay posts { messages: [{ id, from, name?, text, receivedAt }] }. The token in the URL is the secret.
+app.post("/webhooks/sms/:token", async (c) => {
+  const conn = await withAdmin((db) => one<{ tenant_id: string }>(db,
+    "select tenant_id from channel_connections where kind = 'sms_relay' and external_id = $1 and status = 'active'", [c.req.param("token")]));
+  if (!conn) return c.text("Not found", 404);
+  const body = await c.req.json().catch(() => null);
+  const list: any[] = Array.isArray(body?.messages) ? body.messages.slice(0, 100) : body ? [body] : [];
+  let accepted = 0;
+  for (const raw of list) {
+    let msg;
+    try { msg = parseSmsRelay(raw); } catch { continue; }
+    await ingest(conn.tenant_id, msg); accepted++;
+  }
+  return c.json({ ok: true, accepted });
 });
 
 // ---------------------------------------------------------------- Checkatrade lead webhook (strategic accounts)

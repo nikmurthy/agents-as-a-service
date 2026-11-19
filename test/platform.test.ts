@@ -200,6 +200,27 @@ test("website form webhook lands as a message for the right business", async () 
   await drain();
 });
 
+test("texts from the Mac relay land as messages for the right business, once", async () => {
+  const url = await addWebhook(A, "sms_relay");
+  assert.match(url, /\/webhooks\/sms\//);
+  const path = url.replace("https://platform.example", "");
+  const post = (body: unknown) => app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const batch = { messages: [
+    { id: "sms-1", from: "07700 900888", text: "Hi, can I book a consultation next week?", receivedAt: "2026-11-19T10:00:00Z" },
+    { id: "sms-bad", from: "", text: "no sender" },
+  ] };
+  const res = await post(batch);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).accepted, 1);
+  await post(batch); // the relay retrying must not duplicate
+  const rows = await withTenant(A, (db) => db.query("select channel, body from messages where channel_message_id = 'sms-1'"));
+  assert.equal(rows.rows.length, 1);
+  assert.equal(rows.rows[0].channel, "sms");
+  assert.equal((await withTenant(B, (db) => one(db, "select count(*)::int as n from messages where channel_message_id = 'sms-1'"))).n, 0);
+  assert.equal((await app.request("/webhooks/sms/not-a-token", { method: "POST", body: "{}", headers: { "content-type": "application/json" } })).status, 404);
+  await drain();
+});
+
 test("row-level security keeps businesses apart", async () => {
   const aCount = await withTenant(A, (db) => one(db, "select count(*)::int as n from contacts"));
   const bCount = await withTenant(B, (db) => one(db, "select count(*)::int as n from contacts"));
