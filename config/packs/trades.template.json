@@ -33,6 +33,7 @@
     ],
     "replyVia": {
       "checkatrade": [
+        "email",
         "checkatrade_message",
         "whatsapp"
       ],

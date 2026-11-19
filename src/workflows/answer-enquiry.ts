@@ -145,6 +145,6 @@ export async function chooseRoute(db: Db, tenant: Tenant, channel: string, conta
     : r === "checkatrade_message" ? channel === "checkatrade"
     : r === "sms" || r === "phone" ? !!contact.phone
     : false;
-  const fallback: ReplyRoute[] = channel === "whatsapp" ? ["whatsapp", "phone"] : channel === "sms" ? ["sms", "whatsapp", "phone"] : channel === "checkatrade" ? ["checkatrade_message", "phone", "email"] : ["email", "whatsapp", "phone"];
+  const fallback: ReplyRoute[] = channel === "whatsapp" ? ["whatsapp", "phone"] : channel === "sms" ? ["sms", "whatsapp", "phone"] : channel === "checkatrade" ? ["email", "checkatrade_message", "phone"] : ["email", "whatsapp", "phone"];
   return [...prefs, ...fallback].find(ok) ?? "phone";
 }

@@ -3,6 +3,7 @@ import { clients } from "../integrations/index.js";
 import { googleToken, type Connection } from "../connections.js";
 import { parseGmail, parseAddress } from "./parse.js";
 import { ingest } from "../ingest.js";
+import type { InboundMessage } from "../types.js";
 import { loadTenant } from "../tenants.js";
 
 /** Checks every connected Gmail inbox for new messages since the last check (Gmail history API). */
@@ -20,7 +21,7 @@ export async function pollAllGmail(): Promise<number> {
 }
 
 async function pollGmail(conn: Connection): Promise<number> {
-  const found: { tenantId: string; parsed: ReturnType<typeof parseGmail> }[] = [];
+  const found: { tenantId: string; parsed: InboundMessage }[] = [];
   await withTenantSession(conn.tenant_id, async (db) => {
     const tenant = await loadTenant(db, conn.tenant_id);
     const token = await googleToken(db, conn);
@@ -47,7 +48,8 @@ async function pollGmail(conn: Connection): Promise<number> {
       if (!labels.includes("INBOX") || labels.includes("SENT") || labels.includes("DRAFT") || labels.includes("SPAM")) continue;
       const from = parseAddress((msg.payload?.headers ?? []).find((h: any) => h.name.toLowerCase() === "from")?.value ?? "");
       if (from.email === conn.external_id) continue; // our own sent mail
-      found.push({ tenantId: conn.tenant_id, parsed: parseGmail(msg, { checkatradeSenders: tenant.settings.checkatradeSenders ?? [] }) });
+      const parsed = parseGmail(msg, { checkatradeSenders: tenant.settings.checkatradeSenders ?? [] });
+      if (parsed) found.push({ tenantId: conn.tenant_id, parsed }); // null: a Checkatrade email that isn't an enquiry
     }
     await db.query("update channel_connections set cursor = $2, last_error = null where id = $1", [conn.id, { historyId: res.historyId }]);
   });

@@ -53,6 +53,7 @@
     "replyGuidance": "First reply to any new job should do three things in this order: 1) give a rough price range from the price guide for the flooring type they mention, saying it's a guide and the final quote follows a free measure-up; 2) ask for room sizes (or rough dimensions) and a few photos of the current floor if they haven't sent them; 3) offer two or three measure-up times. Keep it short enough to read on a phone.",
     "replyVia": {
       "checkatrade": [
+        "email",
         "checkatrade_message",
         "whatsapp"
       ],

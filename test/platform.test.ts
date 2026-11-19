@@ -152,8 +152,44 @@ test("Checkatrade lead by email -> reply route is Checkatrade -> owner gets word
 
   await pressButton(lastButtons().buttons![0]);
   await drain();
-  assert.match(wa.last(OWNER)!.text, /^Paste this into Checkatrade/);
+  assert.match(wa.last(OWNER)!.text, /^Paste this into Checkatrade \(Chloe, LVT kitchen\)/);
   assert.equal((await withTenant(A, (db) => one(db, "select status from drafts where id = $1", [draft.id]))).status, "manual");
+});
+
+test("Checkatrade lead with the customer's email -> approved reply goes to the customer as a fresh email", async () => {
+  google.addEmail(gmailMsg({
+    id: "ct2", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example", subject: "New lead: Herringbone hallway",
+    html: `<table><tr><td>Job title</td><td>Herringbone hallway</td></tr><tr><td>Job reference</td><td>CT-5521</td></tr>
+      <tr><td>Description</td><td>Engineered oak herringbone in hallway, about 8m2.</td></tr>
+      <tr><td>Customer name</td><td>Dan Price</td></tr><tr><td>Email address</td><td>dan.price@example.com</td></tr></table>`,
+  }));
+  await taskList.poll_gmail!({}, {} as any);
+  await drain();
+  const draft = await withTenant(A, (db) => one(db, "select id, reply_route, conversation_id from drafts order by created_at desc limit 1"));
+  assert.equal(draft.reply_route, "email");
+
+  const before = google.sent.length;
+  await pressButton(lastButtons().buttons![0]);
+  await drain();
+  assert.equal(google.sent.length, before + 1);
+  const mail = google.sent.at(-1)!;
+  assert.equal(mail.threadId, undefined, "not threaded into Checkatrade's notification");
+  assert.match(mail.raw, /^To: dan\.price@example\.com\r$/m);
+  assert.doesNotMatch(mail.raw, /In-Reply-To/);
+  const subject = Buffer.from(mail.raw.match(/^Subject: =\?UTF-8\?B\?(.+)\?=\r$/m)![1], "base64").toString();
+  assert.equal(subject, "Your Checkatrade request: Herringbone hallway");
+
+  // Checkatrade then emails that the customer sent a message: no contact details, just the job reference.
+  google.addEmail(gmailMsg({ id: "ct3", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example",
+    subject: "Dan sent you a new message", text: "Job reference: CT-5521\nMessage: Do you supply the underlay too?" }));
+  // ...and a review notification, which isn't an enquiry at all.
+  google.addEmail(gmailMsg({ id: "ct4", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example",
+    subject: "You've received a new review", text: "A customer left you a 5 star review." }));
+  await taskList.poll_gmail!({}, {} as any);
+  await drain();
+  const follow = await withTenant(A, (db) => one(db, "select conversation_id, body from messages where channel_message_id = 'ct3'"));
+  assert.equal(follow.conversation_id, draft.conversation_id, "the follow-up joins the same job's conversation");
+  assert.equal(await withTenant(A, (db) => one(db, "select 1 from messages where channel_message_id = 'ct4'")), undefined, "review email ignored");
 });
 
 test("owner edits a draft: their wording is what gets sent", async () => {

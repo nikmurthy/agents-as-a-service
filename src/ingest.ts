@@ -34,21 +34,27 @@ async function matchOrCreateContact(db: Db, m: InboundMessage): Promise<string> 
   const ids: [string, string][] = [];
   if (m.from.email) ids.push(["email", m.from.email]);
   if (m.from.phone) ids.push(["phone", m.from.phone]);
+  const attach = async (contactId: string) => {
+    for (const [kind, value] of ids) {
+      await db.query("insert into contact_identities (tenant_id, contact_id, kind, value) values (app_current_tenant(), $1, $2, $3) on conflict do nothing", [contactId, kind, value]);
+    }
+    if (m.from.name) await db.query("update contacts set name = coalesce(name, $2) where id = $1", [contactId, m.from.name]);
+    return contactId;
+  };
   for (const [kind, value] of ids) {
     const found = await one<{ contact_id: string }>(db, "select contact_id from contact_identities where kind = $1 and value = $2", [kind, value]);
-    if (found) {
-      for (const [k, v] of ids) {
-        await db.query("insert into contact_identities (tenant_id, contact_id, kind, value) values (app_current_tenant(), $1, $2, $3) on conflict do nothing", [found.contact_id, k, v]);
-      }
-      if (m.from.name) await db.query("update contacts set name = coalesce(name, $2) where id = $1", [found.contact_id, m.from.name]);
-      return found.contact_id;
-    }
+    if (found) return attach(found.contact_id);
+  }
+  // Checkatrade's "new message" emails often carry no contact details: the job reference links them to the lead.
+  const ref = m.channel === "checkatrade" ? m.structured?.["Job reference"] : undefined;
+  if (ref) {
+    const lead = await one<{ contact_id: string }>(db,
+      `select c.contact_id from messages p join conversations c on c.id = p.conversation_id
+       where p.channel = 'checkatrade' and p.direction = 'in' and p.structured->>'Job reference' = $1 order by p.received_at desc limit 1`, [ref]);
+    if (lead) return attach(lead.contact_id);
   }
   const c = await one<{ id: string }>(db, "insert into contacts (tenant_id, name) values (app_current_tenant(), $1) returning id", [m.from.name ?? null]);
-  for (const [kind, value] of ids) {
-    await db.query("insert into contact_identities (tenant_id, contact_id, kind, value) values (app_current_tenant(), $1, $2, $3) on conflict do nothing", [c!.id, kind, value]);
-  }
-  return c!.id;
+  return attach(c!.id);
 }
 
 async function openConversation(db: Db, contactId: string, m: InboundMessage): Promise<string> {

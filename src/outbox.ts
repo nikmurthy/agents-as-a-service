@@ -14,7 +14,9 @@ export async function sendOutbox(tenantId: string, draftId: string, attempt = 1,
     const d = await one(db,
       `select d.*, c.whatsapp_window_closes_at, c.email_thread, coalesce(ct.name, '') as customer,
               (select value from contact_identities i where i.contact_id = c.contact_id and kind = 'email' limit 1) as email,
-              (select value from contact_identities i where i.contact_id = c.contact_id and kind = 'phone' limit 1) as phone
+              (select value from contact_identities i where i.contact_id = c.contact_id and kind = 'phone' limit 1) as phone,
+              (select coalesce(m.structured->>'Job', m.subject) from messages m where m.conversation_id = c.id and m.direction = 'in'
+                 and m.channel = 'checkatrade' order by m.received_at desc limit 1) as checkatrade_job
        from drafts d join conversations c on c.id = d.conversation_id join contacts ct on ct.id = c.contact_id where d.id = $1`, [draftId]);
     if (!d || d.status !== "approved") return;
     const to = d.reply_route === "email" ? d.email : d.phone;
@@ -57,13 +59,17 @@ export async function sendOutbox(tenantId: string, draftId: string, attempt = 1,
         const conn = await getConnection(db, "gmail");
         if (!conn) return fail("your Gmail isn't connected", true);
         const thread = d.email_thread ?? {};
-        const subject = thread.subject ? (/^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`) : "Your enquiry";
+        // No thread yet (e.g. a Checkatrade lead): a fresh email, never a reply into Checkatrade's notification.
+        const subject = thread.subject ? (/^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`)
+          : d.checkatrade_job ? `Your Checkatrade request: ${String(d.checkatrade_job).replace(/^new (lead|job)[:\s-]*/i, "").slice(0, 80)}`
+          : "Your enquiry";
         const raw = buildEmail({ from: conn.external_id, to: d.email, subject, body: d.body, inReplyTo: thread.messageId });
         const r = await clients.google.gmailSend(await googleToken(db, conn), raw, thread.threadId);
         return done("sent", r.id);
       }
       // Manual routes: hand the final wording to the owner.
-      const how = d.reply_route === "checkatrade_message" ? "Paste this into Checkatrade"
+      const which = [d.customer && first(d.customer), d.checkatrade_job].filter(Boolean).join(", ");
+      const how = d.reply_route === "checkatrade_message" ? `Paste this into Checkatrade${which ? ` (${which})` : ""}`
         : d.reply_route === "sms" ? `Text this to ${d.phone ?? "the customer"}`
         : `Call ${first(d.customer)}${d.phone ? ` on ${d.phone}` : ""}. Suggested wording`;
       await notifyOwners(db, `${how}:\n\n${d.body}`);
