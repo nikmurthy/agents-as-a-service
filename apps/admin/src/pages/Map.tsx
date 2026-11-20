@@ -93,7 +93,18 @@ const COLUMNS: { title: string; sub: string; flow?: boolean; layers: Layer[] }[]
           more: ["Their iPhone forwards texts to their Mac. A small relay there sends each new text from a real phone number here, about every 30 seconds.",
             "Skips iMessages, bank codes and delivery alerts, and never sends old texts.", "The Mac has to be on. Replies are approved as usual, then the owner texts the wording."],
           live: conn("sms_relay", "Mac relay") },
-        { name: "Lead-site alerts", sub: "Checkatrade", kind: "ready", tag: "Added", live: conn("checkatrade_webhook", "Checkatrade link") },
+        { name: "Lead-site alerts", sub: "Checkatrade, by email or link", kind: "ready", tag: "Added",
+          more: ["Checkatrade's lead emails in a connected Gmail are read as leads: the job, postcode, start date and the customer's details.",
+            "Their \"new message\" emails join the same job using the job reference. Reviews, invoices and account emails are ignored.",
+            "Each new lead comes with a suggestion: I'm interested, or Not for me with a reason (spam, outside the area). The owner's Approve or Reject is that decision.",
+            "Checkatrade doesn't allow bots, so the owner taps it in Checkatrade by hand: we send the job link, the steps and the reply to paste.",
+            "Once Checkatrade shows the customer's phone or email, the owner sends it to us on WhatsApp or adds it in the Inbox. Replies then go to the customer directly.",
+            "Big Checkatrade accounts can use a direct lead link instead of email."],
+          live: (d) => {
+            const k = n(d.counts.messagesIn, "checkatrade"), link = conn("checkatrade_webhook", "Checkatrade link")(d);
+            return k ? ["live", `${plural(k, "Checkatrade lead or message", "Checkatrade leads and messages")} this week`]
+              : link[0] === "live" ? link : ["built", "Ready. Reads Checkatrade emails in any connected Gmail"];
+          } },
       ] },
       { title: "Unified inbox", note: "Chatwoot or Respond.io", chips: [
         { name: "One view of every message", sub: "Every channel in one standard format, linked to the right customer", kind: "core", wide: true,

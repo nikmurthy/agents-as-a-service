@@ -112,7 +112,7 @@ function Form({ id, initial, canEdit }: { id: string; initial: any; canEdit: boo
               <input type="number" min={1} max={5} step={0.1} value={s.reviewerPassScore ?? ""} onChange={(e) => set("reviewerPassScore", num(e.target.value))} /></Field>
             <Field label="Keep customer messages for (days)" hint="After this, message text is removed.">
               <input type="number" min={7} value={s.retentionDays ?? ""} onChange={(e) => set("retentionDays", e.target.value === "" ? undefined : num(e.target.value))} /></Field>
-            <Field label="Checkatrade sender addresses" hint="One per line. Emails from these addresses are treated as Checkatrade leads.">
+            <Field label="Checkatrade sender addresses" hint="One per line. Emails from checkatrade.com are already read as leads; add any other address that forwards them (for example your own forwarding rule).">
               <textarea rows={3} value={(s.checkatradeSenders ?? []).join("\n")} onChange={(e) => set("checkatradeSenders", e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} /></Field>
           </Card>
         </fieldset>

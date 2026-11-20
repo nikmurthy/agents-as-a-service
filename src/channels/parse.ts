@@ -24,9 +24,10 @@ export function htmlToText(html: string): string {
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
     .replace(/<\/(p|h\d|tr|div|li)>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/td>\s*<td[^>]*>/gi, ": ")
+    .replace(/<\/t[dh]>\s*<t[dh][^>]*>/gi, ": ")
     .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&pound;/g, "£")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
     .split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
 }
 
@@ -49,26 +50,36 @@ export function decodeGmail(msg: any): { headers: Record<string, string>; text?:
   return { headers, text, html };
 }
 
-export function parseGmail(msg: any, opts: { checkatradeSenders: string[] }): InboundMessage {
+/**
+ * Reads one Gmail message. Checkatrade emails are read as Checkatrade leads; Checkatrade's other emails
+ * (reviews, invoices, account notices) return null so they never become enquiries.
+ */
+export function parseGmail(msg: any, opts: { checkatradeSenders: string[] }): InboundMessage | null {
   const { headers, text, html } = decodeGmail(msg);
   const from = parseAddress(headers["from"] ?? "");
   const base = {
     channelMessageId: msg.id as string,
     receivedAt: new Date(Number(msg.internalDate)).toISOString(),
-    email: { threadId: msg.threadId as string, messageId: headers["message-id"] },
   };
-  const isCheckatrade = !!from.email && (opts.checkatradeSenders.includes(from.email) || /@(.+\.)?checkatrade\.com$/.test(from.email));
-  if (isCheckatrade && html) return { ...base, ...parseCheckatradeEmailHtml(html), subject: headers["subject"] };
+  if (isCheckatradeSender(from.email, opts.checkatradeSenders)) {
+    const lead = parseCheckatradeEmail({ subject: headers["subject"], html, text });
+    // No email thread: a reply by email goes to the customer as a fresh email, never into Checkatrade's notification.
+    return lead && { ...base, ...lead };
+  }
 
   const body = (text ?? (html ? htmlToText(html) : "")).trim();
   return {
     ...base,
+    email: { threadId: msg.threadId as string, messageId: headers["message-id"] },
     channel: "email",
     from: { name: from.name, email: from.email, phone: normalisePhone(body.match(MOBILE)?.[0]) },
     subject: headers["subject"],
     text: stripQuotedReply(body),
   };
 }
+
+export const isCheckatradeSender = (email: string | undefined, extra: string[] = []) =>
+  !!email && (extra.includes(email) || /@(.+\.)?checkatrade\.com$/.test(email));
 
 /** Drop the quoted previous message from email replies ("On ... wrote:"). */
 export function stripQuotedReply(body: string): string {
@@ -77,30 +88,95 @@ export function stripQuotedReply(body: string): string {
 }
 
 // ---------------------------------------------------------------- Checkatrade
-/** Lead and new-message notification emails: read label/value table rows; fall back to the whole text. */
-export function parseCheckatradeEmailHtml(html: string): Omit<InboundMessage, "channelMessageId" | "receivedAt"> {
-  const fields: Record<string, string> = {};
-  for (const m of html.matchAll(/<tr>\s*<td[^>]*>\s*<b>([^<]{1,60})<\/b>\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<\/tr>/gi)) {
-    fields[htmlToText(m[1])] = htmlToText(m[2]);
+// Checkatrade's emails vary by lead type and change over time, so they are read as "Label: value" lines
+// (table rows become such lines in htmlToText) against a list of known labels, rather than one exact layout.
+const CT_LABELS: Record<string, string[]> = {
+  name: ["customer", "customer name", "name", "homeowner", "contact name", "client", "client name"],
+  phone: ["phone", "phone number", "telephone", "telephone number", "mobile", "mobile number", "contact number", "tel"],
+  email: ["email", "email address", "e-mail", "customer email"],
+  description: ["description", "job description", "details", "job details", "message", "customer message", "enquiry", "notes", "additional information"],
+  reference: ["job reference", "job ref", "job reference number", "reference", "ref", "job id", "job number", "lead id", "lead reference"],
+  job: ["job", "job title", "title", "job type", "category", "trade", "work type", "service"],
+  postcode: ["postcode", "post code", "location", "area"],
+  start: ["preferred start", "start date", "when", "timeframe", "timescale", "preferred start date"],
+};
+const CT_CANON = new Map(Object.entries(CT_LABELS).flatMap(([k, ls]) => ls.map((l) => [l, k] as const)));
+const NICE: Record<string, string> = { reference: "Job reference", job: "Job", postcode: "Postcode", start: "Preferred start" };
+const NOT_ENQUIRY = /\b(review|reviews|feedback|invoice|payment|receipt|statement|direct debit|password|verify|verification|newsletter|webinar|renewal|membership|subscription|vetting|insurance|survey)\b/i;
+const ENQUIRY = /\b(lead|leads|enquiry|enquiries|job|request|quote|message|messaged|replied|contacted)\b/i;
+
+/** Reads "Label: value" lines, and a known label on its own line followed by its value. */
+export function labelledFields(text: string): { label: string; value: string }[] {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const out: { label: string; value: string }[] = [];
+  const known = (l: string) => CT_CANON.has(l.toLowerCase().replace(/[:*]+$/, "").trim());
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^([A-Za-z][A-Za-z '’/()&-]{0,39}?)\s*[:*]+\s*(.+)$/);
+    if (m) { out.push({ label: m[1].trim(), value: m[2].trim() }); continue; }
+    if (known(lines[i]) && lines[i + 1] && !known(lines[i + 1])) {
+      out.push({ label: lines[i].replace(/[:*]+$/, "").trim(), value: lines[i + 1] });
+      i++;
+    }
   }
-  const get = (...labels: string[]) => {
-    const k = Object.keys(fields).find((f) => labels.includes(f.toLowerCase()));
-    return k ? fields[k] : undefined;
+  return out;
+}
+
+/**
+ * A Checkatrade lead or new-message notification email. Returns null for Checkatrade's other emails.
+ * The job reference (when there is one) links later messages about the same job to the same conversation.
+ */
+export function parseCheckatradeEmail(e: { subject?: string; html?: string; text?: string }): Omit<InboundMessage, "channelMessageId" | "receivedAt"> | null {
+  const subject = e.subject?.trim() ?? "";
+  const body = (e.html ? htmlToText(e.html) : e.text ?? "").trim();
+  const found: Record<string, string> = {};
+  const structured: Record<string, string> = {};
+  for (const { label, value } of labelledFields(body)) {
+    const key = CT_CANON.get(label.toLowerCase());
+    if (key && !found[key]) found[key] = value;
+    if (key && NICE[key]) structured[NICE[key]] ??= value.slice(0, 200);
+    else if (!key && label.length <= 30 && value.length <= 200 && !/https?:/i.test(value)) structured[label] ??= value;
+  }
+  if (!found.reference) {
+    const ref = `${subject}\n${body}`.match(/\b(?:job|lead)\s*(?:ref(?:erence)?|id|number|no\.?)\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{3,})\b/i)?.[1];
+    if (ref) { found.reference = ref; structured["Job reference"] = ref; }
+  }
+  const email = normaliseEmail(found.email?.match(/[^\s<>()]+@[^\s<>()]+\.[a-z]{2,}/i)?.[0]);
+  const contact = {
+    name: found.name?.slice(0, 100),
+    email: email && !isCheckatradeSender(email) ? email : undefined,
+    phone: normalisePhone(found.phone ?? body.match(MOBILE)?.[0]),
   };
-  const skip = new Set(["description", "message", "customer", "phone", "email"]);
+  const isMessage = /\b(new message|sent you a message|messaged you|has replied|replied to you)\b/i.test(subject);
+  const isEnquiry = !!found.description || !!contact.phone || !!contact.email || !!found.reference || ENQUIRY.test(subject);
+  if ((NOT_ENQUIRY.test(subject) && !found.description) || !isEnquiry) return null;
+  structured["Checkatrade email"] = isMessage ? "Message from the customer" : "New lead";
+  const link = checkatradeJobLink(`${e.html ?? ""}\n${e.text ?? ""}`);
+  if (link) structured["Job link"] = link;
+  for (const k of ["name", "phone", "email"]) delete structured[k];
   return {
     channel: "checkatrade",
-    from: { name: get("customer", "name"), email: normaliseEmail(get("email")), phone: normalisePhone(get("phone")) },
-    text: get("description", "message") ?? htmlToText(html),
-    structured: Object.fromEntries(Object.entries(fields).filter(([k]) => !skip.has(k.toLowerCase()))),
+    from: contact,
+    subject: subject || undefined,
+    text: (found.description ?? body).slice(0, 5000),
+    structured,
   };
+}
+
+/** The first link to a job in Checkatrade's members' app (the trade's view of the job), if there is one. */
+export function checkatradeJobLink(s: string): string | undefined {
+  for (const m of s.matchAll(/https:\/\/(?:[a-z0-9-]+\.)*checkatrade\.com\/[^\s"'<>)]*/gi)) {
+    const url = m[0].replace(/&amp;/g, "&").replace(/[.,]+$/, "");
+    if (/members|\/jobs?\//i.test(url) && !/unsubscribe|preferences|support|blog/i.test(url)) return url.slice(0, 500);
+  }
+  return undefined;
 }
 
 /** Checkatrade lead delivery webhook (strategic accounts). */
 export function parseCheckatradeWebhook(raw: any): InboundMessage {
-  const structured: Record<string, string> = {
+  const structured: Record<string, string | undefined> = {
     Job: raw.title, Category: raw.category, Postcode: raw.postcode,
     "Preferred start": raw.preferredStart?.option, "Lead type": raw.source,
+    "Job reference": raw.jobId, "Job link": typeof raw.tradeWebUrl === "string" ? checkatradeJobLink(raw.tradeWebUrl) : undefined,
   };
   for (const qa of raw.additionalInformation ?? []) structured[qa.question] = qa.answer;
   return {
@@ -110,7 +186,7 @@ export function parseCheckatradeWebhook(raw: any): InboundMessage {
     from: { name: raw.customerName, email: normaliseEmail(raw.customerEmail), phone: normalisePhone(raw.customerPhone) },
     subject: raw.title,
     text: raw.jobDescription ?? "",
-    structured: Object.fromEntries(Object.entries(structured).filter(([, v]) => v)),
+    structured: Object.fromEntries(Object.entries(structured).filter(([, v]) => v)) as Record<string, string>,
     attachments: (raw.media ?? []).map((url: string) => ({ url, kind: "image" })),
   };
 }

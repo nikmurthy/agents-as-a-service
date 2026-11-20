@@ -136,10 +136,11 @@ test("customer picks a time -> booking confirmed, other holds released -> approv
   assert.match(wa.last(CUSTOMER)!.text, /booked in/);
 });
 
-test("Checkatrade lead by email -> reply route is Checkatrade -> owner gets wording to paste", async () => {
+test("Checkatrade lead: owner taps Interested -> gets the steps -> sends the customer's details -> saved for direct replies", async () => {
   google.addEmail(gmailMsg({
     id: "ct1", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example", subject: "New lead: Flooring in BS16",
-    html: `<table><tr><td><b>Job</b></td><td>LVT kitchen</td></tr><tr><td><b>Description</b></td><td>Click LVT in kitchen diner, about 25m2.</td></tr><tr><td><b>Customer</b></td><td>Chloe Bennett</td></tr><tr><td><b>Phone</b></td><td>07700 900801</td></tr></table>`,
+    html: `<table><tr><td><b>Job</b></td><td>LVT kitchen</td></tr><tr><td><b>Description</b></td><td>Click LVT in kitchen diner, about 25m2.</td></tr><tr><td><b>Customer</b></td><td>Chloe Bennett</td></tr></table>
+      <p><a href="https://membersapp.checkatrade.com/jobs/abc-123">View job</a> · <a href="https://www.checkatrade.com/unsubscribe?x=1">Unsubscribe</a></p>`,
   }));
   await taskList.poll_gmail!({}, {} as any);
   await drain();
@@ -147,13 +148,107 @@ test("Checkatrade lead by email -> reply route is Checkatrade -> owner gets word
   const msg = await withTenant(A, (db) => one(db, "select channel, body, from_name from messages where channel_message_id = 'ct1'"));
   assert.equal(msg.channel, "checkatrade");
   assert.equal(msg.from_name, "Chloe Bennett");
-  const draft = await withTenant(A, (db) => one(db, "select id, reply_route from drafts order by created_at desc limit 1"));
-  assert.equal(draft.reply_route, "checkatrade_message");
+  const draft = await withTenant(A, (db) => one(db, "select id, reply_route, conversation_id from drafts order by created_at desc limit 1"));
+  assert.equal(draft.reply_route, "checkatrade_message", "no email for Chloe yet, so the reply is pasted into Checkatrade");
+  const approval = lastButtons();
+  assert.match(approval.text, /Suggested: 👍 I'm interested/);
 
+  await pressButton(approval.buttons![0]);                 // Interested
+  await drain();
+  const steps = wa.last(OWNER)!.text;
+  assert.match(steps, /^Checkatrade: Chloe, LVT kitchen/);
+  assert.match(steps, /Open the job: https:\/\/membersapp\.checkatrade\.com\/jobs\/abc-123/);
+  assert.match(steps, /Tap "I'm interested"/);
+  assert.match(steps, /Send me Chloe's phone number or email/);
+  assert.equal((await withTenant(A, (db) => one(db, "select status from drafts where id = $1", [draft.id]))).status, "manual");
+  assert.equal((await withTenant(A, (db) => one(db, "select decision from checkatrade_leads where conversation_id = $1", [draft.conversation_id]))).decision, "interested");
+
+  // The owner copies Chloe's details out of Checkatrade and sends them to the platform number.
+  await postWhatsApp(waWebhook("PLATFORM", OWNER, { type: "text", text: { body: "Her number is 07700 900811 and email chloe.b@example.com" } }, "Mark"));
+  await drain();
+  assert.match(wa.last(OWNER)!.text, /Saved Chloe's number and email ✓/);
+  const ids = await withTenant(A, (db) => many(db,
+    "select kind, value from contact_identities where contact_id = (select contact_id from conversations where id = $1) order by kind", [draft.conversation_id]));
+  assert.deepEqual(ids.map((i) => `${i.kind}:${i.value}`), ["email:chloe.b@example.com", "phone:+447700900811"]);
+  assert.ok((await withTenant(A, (db) => one(db, "select details_added_at from checkatrade_leads where conversation_id = $1", [draft.conversation_id]))).details_added_at);
+
+  // Chloe's next email comes straight to the business and the reply goes back by email: no Checkatrade step.
+  google.addEmail(gmailMsg({ id: "chloe-2", from: "Chloe Bennett <chloe.b@example.com>", to: "owner@business.example", subject: "Re: LVT", text: "Thanks! Could you also do the utility room?" }));
+  await taskList.poll_gmail!({}, {} as any);
+  await drain();
+  const next = await withTenant(A, (db) => one(db, "select reply_route, conversation_id from drafts order by created_at desc limit 1"));
+  assert.equal(next.conversation_id, draft.conversation_id, "same customer, same conversation");
+  assert.equal(next.reply_route, "email");
+  assert.doesNotMatch(lastButtons().text, /Suggested/);
+  await pressButton(lastButtons().buttons![2]);            // not needed for this test: reject
+  await drain();
+});
+
+test("Checkatrade lead outside the area: Not for me is suggested; pressing it sends nothing and gives the steps", async () => {
+  google.addEmail(gmailMsg({ id: "ct-far", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example", subject: "New lead: Carpet in IV2",
+    text: "Job: Bedroom carpet\nPostcode: IV2 3AB\nCustomer: Rory Mackay\nDescription: Carpet for a double bedroom." }));
+  await taskList.poll_gmail!({}, {} as any);
+  await drain();
+  const approval = lastButtons();
+  assert.match(approval.text, /Suggested: Not for me \(Outside the area we cover\)/);
+  const sentBefore = wa.sent.filter((s) => s.to !== OWNER).length + google.sent.length;
+  await pressButton(approval.buttons![2]);                 // Not for me
+  await drain();
+  const reply = wa.last(OWNER)!.text;
+  assert.match(reply, /not for you\. Nothing was sent to Rory/);
+  assert.match(reply, /Tap "Not for me"/);
+  assert.match(reply, /Choose: Outside the area we cover/);
+  assert.equal(wa.sent.filter((s) => s.to !== OWNER).length + google.sent.length, sentBefore);
+  const lead = await withTenant(A, (db) => one(db, "select l.decision from checkatrade_leads l join messages m on m.id = l.message_id where m.channel_message_id = 'ct-far'"));
+  assert.equal(lead.decision, "not_for_me");
+});
+
+test("Checkatrade spam lead: no draft, just the steps to turn it down", async () => {
+  const draftsBefore = (await withTenant(A, (db) => one(db, "select count(*)::int as n from drafts"))).n;
+  google.addEmail(gmailMsg({ id: "ct-spam", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example", subject: "New lead: Flooring",
+    text: "Customer: Flooring Supplies Ltd\nDescription: We offer trade prices on all laminate, call us." }));
+  await taskList.poll_gmail!({}, {} as any);
+  await drain();
+  assert.match(wa.last(OWNER)!.text, /looks like one to turn down: This job is spam/);
+  assert.match(wa.last(OWNER)!.text, /Tap "Not for me"/);
+  assert.equal((await withTenant(A, (db) => one(db, "select count(*)::int as n from drafts"))).n, draftsBefore);
+});
+
+test("Checkatrade lead with the customer's email -> approved reply goes to the customer as a fresh email", async () => {
+  google.addEmail(gmailMsg({
+    id: "ct2", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example", subject: "New lead: Herringbone hallway",
+    html: `<table><tr><td>Job title</td><td>Herringbone hallway</td></tr><tr><td>Job reference</td><td>CT-5521</td></tr>
+      <tr><td>Description</td><td>Engineered oak herringbone in hallway, about 8m2.</td></tr>
+      <tr><td>Customer name</td><td>Dan Price</td></tr><tr><td>Email address</td><td>dan.price@example.com</td></tr></table>`,
+  }));
+  await taskList.poll_gmail!({}, {} as any);
+  await drain();
+  const draft = await withTenant(A, (db) => one(db, "select id, reply_route, conversation_id from drafts order by created_at desc limit 1"));
+  assert.equal(draft.reply_route, "email");
+
+  const before = google.sent.length;
   await pressButton(lastButtons().buttons![0]);
   await drain();
-  assert.match(wa.last(OWNER)!.text, /^Paste this into Checkatrade/);
-  assert.equal((await withTenant(A, (db) => one(db, "select status from drafts where id = $1", [draft.id]))).status, "manual");
+  assert.match(wa.last(OWNER)!.text, /Sending to Dan by email now ✓ In Checkatrade, also tap "I'm interested"/);
+  assert.equal(google.sent.length, before + 1);
+  const mail = google.sent.at(-1)!;
+  assert.equal(mail.threadId, undefined, "not threaded into Checkatrade's notification");
+  assert.match(mail.raw, /^To: dan\.price@example\.com\r$/m);
+  assert.doesNotMatch(mail.raw, /In-Reply-To/);
+  const subject = Buffer.from(mail.raw.match(/^Subject: =\?UTF-8\?B\?(.+)\?=\r$/m)![1], "base64").toString();
+  assert.equal(subject, "Your Checkatrade request: Herringbone hallway");
+
+  // Checkatrade then emails that the customer sent a message: no contact details, just the job reference.
+  google.addEmail(gmailMsg({ id: "ct3", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example",
+    subject: "Dan sent you a new message", text: "Job reference: CT-5521\nMessage: Do you supply the underlay too?" }));
+  // ...and a review notification, which isn't an enquiry at all.
+  google.addEmail(gmailMsg({ id: "ct4", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example",
+    subject: "You've received a new review", text: "A customer left you a 5 star review." }));
+  await taskList.poll_gmail!({}, {} as any);
+  await drain();
+  const follow = await withTenant(A, (db) => one(db, "select conversation_id, body from messages where channel_message_id = 'ct3'"));
+  assert.equal(follow.conversation_id, draft.conversation_id, "the follow-up joins the same job's conversation");
+  assert.equal(await withTenant(A, (db) => one(db, "select 1 from messages where channel_message_id = 'ct4'")), undefined, "review email ignored");
 });
 
 test("owner edits a draft: their wording is what gets sent", async () => {

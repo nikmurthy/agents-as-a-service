@@ -50,9 +50,43 @@ export function Conversation() {
           </div>
         ))}
       </div>
+      {data.lead && <CheckatradeLead lead={data.lead} contact={data.contact} convId={data.conversation.id} bizId={id} onChange={reload} />}
       <Quote conv={data.conversation} bizId={id} onChange={reload} />
-      {data.drafts.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} />)}
+      {data.drafts.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} leadPending={data.lead?.decision === "pending" && d.kind === "reply"} />)}
     </Page>
+  );
+}
+
+/** Checkatrade doesn't allow automated access, so the owner makes this one decision there by hand. */
+function CheckatradeLead({ lead, contact, convId, bizId, onChange }: { lead: any; contact: any; convId: string; bizId: string; onChange: () => void }) {
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const { busy, error, run } = useAction();
+  const save = () => run(async () => { await post(`/businesses/${bizId}/conversations/${convId}/contact-details`, { email, phone }); setEmail(""); setPhone(""); onChange(); });
+  const open = lead.job_url ? <a href={lead.job_url} target="_blank" rel="noreferrer">Open the job in Checkatrade</a> : <>Open the job in the Checkatrade app (Jobs)</>;
+  const known = contact?.email || contact?.phone;
+  return (
+    <Card title="Checkatrade lead">
+      {lead.decision === "pending" && (<>
+        <p>{lead.suggestion === "interested" ? <>Suggested: <strong>I'm interested</strong>.</> : <>Suggested: <strong>Not for me</strong> ({lead.suggestion_reason ?? "doesn't look like a fit"}).</>}</p>
+        <p className="muted">Decide with the reply below: <em>Interested</em> approves it for you to paste into Checkatrade; <em>Not for me</em> sends nothing.</p>
+      </>)}
+      {lead.decision === "not_for_me" && (
+        <ol><li>{open}</li><li>Tap <strong>Not for me</strong></li><li>Choose: {lead.suggestion_reason ?? "the reason that fits"}</li></ol>
+      )}
+      {lead.decision === "interested" && (<>
+        <ol><li>{open}</li><li>Tap <strong>I'm interested</strong></li><li>Paste the approved reply into the chat</li>
+          <li>Add the customer's phone or email below, so the next replies can go to them directly</li></ol>
+        {known && <p className="muted">On file: {[contact.phone, contact.email].filter(Boolean).join(" · ")}</p>}
+        <div className="form-row">
+          <label>Phone<input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="07…" /></label>
+          <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="name@example.com" /></label>
+        </div>
+        <ErrorNote message={error} />
+        <div className="buttons"><button className="primary" disabled={busy || !(email.trim() || phone.trim())} onClick={save}>Save details</button></div>
+        {lead.details_added_at && <p className="note good">Details added {when(lead.details_added_at)}. Replies can now go to them directly.</p>}
+      </>)}
+    </Card>
   );
 }
 
@@ -74,7 +108,7 @@ function Quote({ conv, bizId, onChange }: { conv: any; bizId: string; onChange: 
   );
 }
 
-function Draft({ draft, bizId, onChange }: { draft: any; bizId: string; onChange: () => void }) {
+function Draft({ draft, bizId, onChange, leadPending }: { draft: any; bizId: string; onChange: () => void; leadPending?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(draft.body);
   const { busy, error, run } = useAction();
@@ -92,9 +126,9 @@ function Draft({ draft, bizId, onChange }: { draft: any; bizId: string; onChange
             <button className="primary" disabled={busy || !text.trim()} onClick={() => act("edit", { body: text })}>Send my version</button>
             <button disabled={busy} onClick={() => { setEditing(false); setText(draft.body); }}>Cancel</button>
           </>) : (<>
-            <button className="primary" disabled={busy} onClick={() => act("approve")}>Approve and send</button>
+            <button className="primary" disabled={busy} onClick={() => act("approve")}>{leadPending ? "Interested" : "Approve and send"}</button>
             <button disabled={busy} onClick={() => setEditing(true)}>Edit</button>
-            <button className="danger" disabled={busy} onClick={() => act("reject")}>Reject</button>
+            <button className="danger" disabled={busy} onClick={() => act("reject")}>{leadPending ? "Not for me" : "Reject"}</button>
           </>)}
         </div>
       )}

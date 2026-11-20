@@ -173,3 +173,8 @@ pre.instructions { white-space: pre-wrap; background: #f8f9fb; border: 1px solid
 .seg button + button { border-left: 1px solid var(--line); } .seg button.on { background: var(--text); color: var(--card); } .seg button.on .muted { color: inherit; opacity: .75; }
 .mchip .more { margin-top: .3rem; color: var(--text); font-size: .8rem; } .mchip .more summary { cursor: pointer; color: inherit; opacity: .85; }
 .mchip .more ul { margin: .35rem 0 0; padding-left: 1.05rem; display: grid; gap: .25rem; }
+
+/* Checkatrade lead card: phone and email side by side, stacked on a phone */
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: .75rem; }
+.form-row label { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; }
+@media (max-width: 560px) { .form-row { grid-template-columns: 1fr; } }
