@@ -359,6 +359,32 @@ test("flows: owners set each step's choices and automation; staff can look; othe
   assert.equal((await api("ownerB", "PUT", `/businesses/${A}/automations/answer_question`, { on: true })).status, 404);
 });
 
+test("reply style: owners pick a tone and paste examples; contact details are removed; the Settings form keeps it", async () => {
+  const body = { tone: "Warm, friendly and personal.", style: { preset: "friendly", greeting: "hi", length: "short", emoji: "never", spelling: "british", avoid: "cheap",
+    examples: ["Hi Jo, lovely to hear from you! Ring me on 07700 900123 or email mark.b@example.com and we'll sort it. Mark", "  "] } };
+  assert.equal((await api("staffA", "PUT", `/businesses/${A}/reply-style`, body)).status, 403);
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/reply-style`, { ...body, style: { ...body.style, examples: ["a", "b", "c", "d"] } })).status, 400, "up to three");
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/reply-style`, { ...body, style: { ...body.style, greeting: "yo" } })).status, 400);
+  const r = await api("ownerA", "PUT", `/businesses/${A}/reply-style`, body);
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json.style.examples, ["Hi Jo, lovely to hear from you! Ring me on [phone] or email [email] and we'll sort it. Mark"], "blank examples dropped, details removed");
+
+  const reply = (await api("ownerA", "GET", `/businesses/${A}/flows`)).json.reply;
+  assert.equal(reply.tone, "Warm, friendly and personal.");
+  assert.equal(reply.style.greeting, "hi");
+
+  // Saving the Settings form doesn't wipe it.
+  const current = (await api("ownerA", "GET", `/businesses/${A}/settings`)).json;
+  const formSettings = Object.fromEntries(Object.entries(current.settings).filter(([k]) => k in tenantSettingsSchema.shape)); // what the form sends
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/settings`, { settings: formSettings })).status, 200);
+  assert.equal((await api("ownerA", "GET", `/businesses/${A}/flows`)).json.reply.style.preset, "friendly");
+
+  const logged = await withTenant(A, (db) => many(db, "select detail::text as d from audit_log where action in ('reply_style.updated', 'settings.updated')"));
+  assert.ok(logged.length >= 2);
+  assert.ok(logged.every((l) => !l.d.includes("lovely to hear from you")), "example text stays out of the audit log");
+  assert.equal((await api("ownerB", "PUT", `/businesses/${A}/reply-style`, body)).status, 404);
+});
+
 test("people: the last owner can't be removed or demoted; approvers need a WhatsApp number", async () => {
   const members = (await api("ownerA", "GET", `/businesses/${A}/members`)).json.members;
   const owner = members.find((m: any) => m.role === "owner");

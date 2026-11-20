@@ -30,6 +30,17 @@ export interface TenantSettings {
   reviewerPassScore: number;
   checkatradeSenders?: string[];       // From addresses of Checkatrade lead emails
   retentionDays?: number;              // message bodies deleted after this many days
+  replyStyle?: ReplyStyle;             // set in Flows → Reply (not on the Settings form)
+}
+
+export interface ReplyStyle {
+  preset?: "friendly" | "professional" | "brief" | "custom";
+  greeting?: "hi" | "hello" | "dear";
+  length?: "short" | "medium" | "detailed";
+  emoji?: "never" | "sometimes";
+  spelling?: "british" | "american";
+  avoid?: string;
+  examples?: string[];                 // replies the business wrote, to copy the voice from (emails and phone numbers removed)
 }
 
 export interface Tenant { id: string; slug: string; name: string; pack: string; settings: TenantSettings; status: string }

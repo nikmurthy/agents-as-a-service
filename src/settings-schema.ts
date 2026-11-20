@@ -54,3 +54,22 @@ export const newBusinessSchema = z.object({
 });
 
 export const USE_CASES = ["answer_enquiries", "book_appointments", "chase_quotes", "ask_feedback"] as const;
+
+/** Flows → Reply. Kept apart from the Settings form, which leaves it untouched. */
+export const replyStyleSchema = z.object({
+  preset: z.enum(["friendly", "professional", "brief", "custom"]).optional(),
+  greeting: z.enum(["hi", "hello", "dear"]).optional(),
+  length: z.enum(["short", "medium", "detailed"]).optional(),
+  emoji: z.enum(["never", "sometimes"]).optional(),
+  spelling: z.enum(["british", "american"]).optional(),
+  avoid: z.string().trim().max(500).optional(),
+  examples: z.array(z.string().trim().max(1500, "Keep each example under 1,500 characters")).max(3, "Up to three examples").optional(),
+}).strict();
+
+/** Example replies go to the AI as style only: take out email addresses and phone numbers first. */
+export function scrubExample(text: string): string {
+  return text
+    .replace(/[^\s<>(),;:]+@[^\s<>(),;:]+\.[a-z]{2,}/gi, "[email]")
+    .replace(/(?:\+44\s?|\b0)\d(?:[\s-]?\d){8,9}\b/g, "[phone]")
+    .trim();
+}

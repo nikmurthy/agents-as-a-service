@@ -5,7 +5,7 @@ import { many, one, withAdmin, withTenant } from "../db.js";
 import { audit } from "../audit.js";
 import { env } from "../env.js";
 import { requireUser, requireAdmin, tenantAccess, type Access } from "./auth.js";
-import { newBusinessSchema, tenantSettingsSchema, USE_CASES } from "../settings-schema.js";
+import { newBusinessSchema, replyStyleSchema, scrubExample, tenantSettingsSchema, USE_CASES } from "../settings-schema.js";
 import { addWebhook, connectWhatsApp, createTenant, HOOK_PATH, setTenantStatus, type HookKind } from "../onboarding.js";
 import { googleConnectLink } from "../google-link.js";
 import { approveDraft, editAndApproveDraft, rejectDraft, type DecisionResult } from "../decisions.js";
@@ -177,10 +177,14 @@ admin.put("/businesses/:id/settings", async (c) => {
     const kept = Object.fromEntries(Object.entries(old.settings).filter(([k]) => !known.includes(k)));
     const next = { ...kept, ...body.settings };
     await db.query("update tenants set settings = $1, name = $2 where id = app_current_tenant()", [next, body.name ?? old.name]);
-    await audit(db, { tenantId, actor: actor.audit, action: "settings.updated", entity: "tenant", entityId: tenantId, detail: { previous: old.settings, previousName: old.name } });
+    await audit(db, { tenantId, actor: actor.audit, action: "settings.updated", entity: "tenant", entityId: tenantId, detail: { previous: withoutExamples(old.settings), previousName: old.name } });
   });
   return c.json({ ok: true });
 });
+
+/** Example replies are the business's own text: keep them out of the audit log. */
+const withoutExamples = (settings: any) => settings?.replyStyle?.examples
+  ? { ...settings, replyStyle: { ...settings.replyStyle, examples: `${settings.replyStyle.examples.length} example(s)` } } : settings;
 
 // ---------------------------------------------------------------- use cases
 admin.get("/businesses/:id/use-cases", async (c) => {
@@ -225,6 +229,7 @@ admin.get("/businesses/:id/flows", async (c) => {
       defaults: { learnAfter: DEFAULT_LEARN_AFTER, chaseAfterDays: CHASE_AFTER_DAYS, feedbackAfterDays: FEEDBACK_AFTER_DAYS },
       feedbackPreview: feedbackWording(tenant, "Sam Taylor", fb.reviewLink),
       connected: (await many<{ kind: string }>(db, "select distinct kind from channel_connections where status = 'active'")).map((r) => r.kind),
+      reply: { pack: tenant.pack, tone: tenant.settings.tone ?? "", signOff: tenant.settings.signOff ?? "", style: tenant.settings.replyStyle ?? {} },
       replyVia: tenant.settings.replyVia ?? {},
     };
   });
@@ -265,6 +270,27 @@ admin.put("/businesses/:id/flows/:key", async (c) => {
     await audit(db, { tenantId, actor: actor.audit, action: "use_case.changed", entity: "use_case", entityId: key, detail: { enabled, config: next } });
   });
   return c.json({ ok: true });
+});
+
+// Flows → Reply: tone of voice and the finer points of how replies sound, with example replies to copy.
+admin.put("/businesses/:id/reply-style", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
+  const body = await parse(c, z.object({
+    tone: z.string().trim().min(1, "Describe the tone of voice").max(1000),
+    style: replyStyleSchema,
+  }).strict());
+  const style = { ...body.style, examples: body.style.examples?.map(scrubExample).filter(Boolean) };
+  if (!style.examples?.length) delete style.examples;
+  if (!style.avoid) delete style.avoid;
+  await withTenant(tenantId, async (db) => {
+    const old = await one<{ settings: any }>(db, "select settings from tenants where id = app_current_tenant() for update");
+    if (!old) throw notFound();
+    await db.query("update tenants set settings = settings || $1::jsonb where id = app_current_tenant()", [{ tone: body.tone, replyStyle: style }]);
+    // Example text stays out of the audit log; only what changed.
+    await audit(db, { tenantId, actor: actor.audit, action: "reply_style.updated", entity: "tenant", entityId: tenantId,
+      detail: { previousTone: old.settings.tone, preset: style.preset ?? null, examples: style.examples?.length ?? 0 } });
+  });
+  return c.json({ ok: true, style });
 });
 
 admin.put("/businesses/:id/automations/:category", async (c) => {

@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AgentDefinition, RunEvent, Tenant } from "../types.js";
+import type { AgentDefinition, ReplyStyle, RunEvent, Tenant } from "../types.js";
 import { env } from "../env.js";
 import { tools, type ToolContext, type ToolName } from "./tools.js";
 import { packRules } from "./registry.js";
@@ -11,21 +11,42 @@ export const anthropic = () => (client ??= new Anthropic({ apiKey: env.anthropic
 /** Tests only: swap in a fake client. */
 export function setAnthropicClientForTests(c: Anthropic | undefined) { client = c; }
 
-function systemPrompt(def: AgentDefinition, tenant: Tenant, now: Date): string {
+const GREETING = { hi: "Hi <first name>,", hello: "Hello <first name>,", dear: "Dear <first name>," } as const;
+const LENGTH = { short: "short: a few sentences at most", medium: "medium: a short paragraph or two", detailed: "detailed: cover everything they asked, still clear and easy to read" } as const;
+
+/** How replies should sound: Flows → Reply. */
+export function styleLines(st: ReplyStyle | undefined): string[] {
+  if (!st) return [];
+  const examples = (st.examples ?? []).filter((e) => e.trim());
+  return [
+    st.greeting ? `Greeting: start with "${GREETING[st.greeting]}"` : undefined,
+    st.length ? `Reply length: ${LENGTH[st.length]}` : undefined,
+    st.emoji ? `Emoji: ${st.emoji === "never" ? "never use emoji" : "an occasional emoji is fine on WhatsApp and text, never in email"}` : undefined,
+    st.spelling ? `Spelling: ${st.spelling === "american" ? "American English" : "British English"}` : undefined,
+    st.avoid ? `Words and phrases never to use: ${st.avoid}` : undefined,
+    examples.length ? `Replies the business wrote itself. Match their voice, wording and length. Never copy facts, prices, names, dates or promises from them:\n${examples.map((e, i) => `<example ${i + 1}>\n${e}\n</example ${i + 1}>`).join("\n")}` : undefined,
+  ].filter((x): x is string => !!x);
+}
+
+export function tenantSummary(tenant: Tenant, now: Date): string {
   const s = tenant.settings;
   const local = utcToLocal(now, s.timezone);
-  const summary = [
+  return [
     `Name: ${tenant.name}`,
     `Tone: ${s.tone}`,
     `Sign-off: ${s.signOff}`,
     s.serviceArea?.length ? `Service area (postcode districts): ${s.serviceArea.join(", ")}` : undefined,
     `Services: ${s.services.map((x) => `${x.name} (${x.durationMinutes} min${x.price ? `, ${x.price}` : ""})`).join("; ")}`,
     s.priceGuide?.length ? `Price guide (ranges only, never a firm quote):\n${s.priceGuide.map((p) => `  - ${p.item}: ${p.range}`).join("\n")}` : undefined,
+    ...styleLines(s.replyStyle),
     s.replyGuidance ? `How to shape replies: ${s.replyGuidance}` : undefined,
     `Working hours: ${s.workingHours.start}-${s.workingHours.end}, days ${s.workingHours.days.join(",")} (1=Mon)`,
     `Now: ${new Date(local.slice(0, 10)).toLocaleDateString("en-GB", { weekday: "long", timeZone: "UTC" })} ${local.replace("T", " ")} (${s.timezone})`,
   ].filter(Boolean).join("\n");
-  return def.instructions.replace("{{tenant}}", summary).replace("{{pack_rules}}", packRules(tenant.pack));
+}
+
+function systemPrompt(def: AgentDefinition, tenant: Tenant, now: Date): string {
+  return def.instructions.replace("{{tenant}}", tenantSummary(tenant, now)).replace("{{pack_rules}}", packRules(tenant.pack));
 }
 
 /** Runs one agent to completion: it may call its permitted tools and must finish with its output tool. */
