@@ -39,6 +39,7 @@ async function draft(input: any, ctx: ToolContext): Promise<DraftResult> {
   const sign = ctx.tenant.settings.signOff;
   if (input.triage.nextStep === "escalate") return { replyText: `Hi ${name}, thanks for getting in touch. I'll come back to you personally shortly. ${sign}`, needsHumanBeforeSending: true, internalNote: "Needs the owner." };
   if (input.booking?.action === "confirm_slot") return { replyText: `Great, you're booked in for ${formatLocal(input.booking.slots[0].start)}. See you then! ${sign}`, needsHumanBeforeSending: false, internalNote: "" };
+  if (input.bookingPolicy === "booking_link") return { replyText: `Hi ${name}, thanks for your message. Booking online is easiest. ${sign}`, needsHumanBeforeSending: false, internalNote: "" }; // leaves the link out: code adds it
   if (input.bookingPolicy === "owner_arranges") return { replyText: `Hi ${name}, thanks for your message. I'll be in touch shortly to arrange a time that suits. ${sign}`, needsHumanBeforeSending: false, internalNote: "" };
   const slots = (input.booking?.slots ?? []).map((s: any) => formatLocal(s.start)).join(", ");
   return { replyText: `Hi ${name}, thanks for your message. I could come to measure up on ${slots}. Which suits you? ${sign}`, needsHumanBeforeSending: false, internalNote: "" };

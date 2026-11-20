@@ -25,6 +25,7 @@ const { app } = await import("../src/app.js");
 const { taskList } = await import("../src/jobs/tasks.js");
 const { releaseQueue } = await import("../src/jobs/queue.js");
 const { askFeedback } = await import("../src/workflows/ask-feedback.js");
+const { withBookingLink } = await import("../src/workflows/answer-enquiry.js");
 const { runOnce, Logger } = await import("graphile-worker");
 const { fakeGoogle, fakeWhatsApp, waWebhook } = await import("./fakes.js");
 
@@ -172,6 +173,25 @@ test("feedback: a job the owner marked as done is asked about the next day", asy
   assert.equal(await askFeedback(A), 1);
   const d = await withTenant(A, (db) => one(db, "select kind, category, status from drafts where conversation_id = $1 order by created_at desc limit 1", [conv.id]));
   assert.deepEqual([d.kind, d.category, d.status], ["feedback", "feedback_request", "pending_approval"]);
+});
+
+test("booking link (e.g. Halaxy): replies to someone who wants an appointment always include it", async () => {
+  await withTenant(A, async (db) => {
+    await db.query("delete from automations");
+    await db.query("update tenant_use_cases set enabled = false, config = $1 where use_case = 'book_appointments'",
+      [{ mode: "link", system: "halaxy", link: "https://www.halaxy.com/book/marks-flooring/12345" }]);
+  });
+  await enquiry("Can I book a measure-up for new carpet?");
+  const d = await withTenant(A, (db) => one(db, "select body from drafts order by created_at desc limit 1"));
+  assert.match(d.body, /You can book a time that suits you here: https:\/\/www\.halaxy\.com\/book\/marks-flooring\/12345\n\nMark$|https:\/\/www\.halaxy\.com\/book\/marks-flooring\/12345$/, "the code adds the link the agent left out");
+  const run = await withTenant(A, (db) => one(db, "select count(*)::int as n from run_events where step = 'guard' and detail like 'added the booking link%'"));
+  assert.equal(run.n, 1);
+  assert.equal((await withTenant(A, (db) => one(db, "select count(*)::int as n from holds where status = 'held'"))).n, 0, "no times held");
+});
+
+test("withBookingLink puts the link before a short sign-off", () => {
+  assert.equal(withBookingLink("Hi Jo, thanks.\n\nMark", "https://x.example/b"), "Hi Jo, thanks.\n\nYou can book a time that suits you here: https://x.example/b\n\nMark");
+  assert.equal(withBookingLink("Hi Jo, thanks. Mark", "https://x.example/b"), "Hi Jo, thanks. Mark\n\nYou can book a time that suits you here: https://x.example/b");
 });
 
 test("automations are kept per business", async () => {

@@ -32,13 +32,15 @@ export function Flows() {
   const uc = data.useCases;
   const calendar = data.connected.includes("google_calendar");
   const offersTimes = uc.book_appointments.enabled;
+  const bk = uc.book_appointments.config ?? {};
+  const bookingMode = offersTimes ? "offer" : bk.mode === "link" && bk.link ? "link" : "owner";
   const save = (key: string, body: object) => a.run(async () => { await put(`/businesses/${id}/flows/${key}`, body); reload(); });
   const ro = !canManage || a.busy;
 
   const enquirySteps: Step[] = [
     { key: "arrive", title: "Message arrives", sub: "Email, WhatsApp, form, Checkatrade, texts", tone: "in" },
     { key: "triage", title: "Triage", sub: "What is it? How urgent?" },
-    { key: "booking", title: "Booking", sub: offersTimes && calendar ? "Offers free times" : "You arrange the time", setting: true },
+    { key: "booking", title: "Booking", sub: bookingMode === "link" ? `Sends your ${systemName(bk.system)} booking link` : offersTimes && calendar ? "Offers free times" : "You arrange the time", setting: true },
     { key: "reply", title: "Reply", sub: "Written in your voice, then checked" },
     { key: "approve", title: "You approve", sub: data.learnAfter === 0 ? "Always asks you" : `Learns: offers to automate after ${data.learnAfter}`, tone: "you", setting: true },
     { key: "sent", title: "Sent", sub: "By email or WhatsApp, or you send it", tone: "out" },
@@ -93,17 +95,7 @@ export function Flows() {
         </Card>
       )}
 
-      {flow === "enquiry" && current.key === "booking" && (
-        <Card title="Booking: when someone wants an appointment">
-          <Choice name="booking" disabled={ro} value={offersTimes ? "offer" : "owner"} onChange={(v) => save("book_appointments", { enabled: v === "offer" })} options={[
-            { value: "offer", label: "Offer free times from my calendar", hint: "Up to three times are held in your calendar. The one they pick is booked when you approve the reply." },
-            { value: "owner", label: "Don't offer times: I'll arrange it myself", hint: "The reply says you'll be in touch to arrange a time. Nothing goes in your calendar." },
-          ]} />
-          {offersTimes && !calendar && <p className="note">Google Calendar isn't connected, so for now replies will say you'll arrange the time. <Link to="../connections">Connect it →</Link></p>}
-          <Always items={["Every time offered is checked against your calendar and working hours first", "Nothing is booked until the customer picks a time and you approve the reply",
-            "Times the customer doesn't pick are released", "Moving a booking always comes to you"]} />
-        </Card>
-      )}
+      {flow === "enquiry" && current.key === "booking" && <Booking mode={bookingMode} config={bk} calendar={calendar} save={save} disabled={ro} />}
 
       {flow === "enquiry" && current.key === "reply" && (
         <Card title="Reply">
@@ -154,6 +146,49 @@ export function Flows() {
   );
 }
 
+const SYSTEMS: [string, string][] = [["halaxy", "Halaxy"], ["cliniko", "Cliniko"], ["jane", "Jane"], ["fresha", "Fresha"], ["timely", "Timely"],
+  ["setmore", "Setmore"], ["calendly", "Calendly"], ["acuity", "Acuity"], ["simplybook", "SimplyBook.me"], ["other", "Another system"]];
+const systemName = (k?: string) => (k && k !== "other" ? SYSTEMS.find(([v]) => v === k)?.[1] : undefined) ?? "online";
+
+function Booking({ mode, config, calendar, save, disabled }: { mode: string; config: any; calendar: boolean; save: (k: string, b: object) => void; disabled: boolean }) {
+  const [system, setSystem] = useState<string>(config.system ?? "halaxy");
+  const [link, setLink] = useState<string>(config.link ?? "");
+  const [picked, setPicked] = useState(mode);
+  const choose = (v: string) => {
+    setPicked(v);
+    if (v === "offer") save("book_appointments", { enabled: true });
+    if (v === "owner") save("book_appointments", { enabled: false, config: { mode: "owner" } });
+    if (v === "link" && config.link) save("book_appointments", { enabled: false, config: { mode: "link" } });
+  };
+  const saveLink = () => save("book_appointments", { enabled: false, config: { mode: "link", system, link: link.trim() } });
+  return (
+    <Card title="Booking: when someone wants an appointment">
+      <Choice name="booking" disabled={disabled} value={picked} onChange={choose} options={[
+        { value: "offer", label: "Offer free times from my calendar", hint: "Up to three times are held in your Google Calendar. The one they pick is booked when you approve the reply." },
+        { value: "link", label: "Send them my online booking link", hint: "For Halaxy, Cliniko, Fresha and other booking systems: the customer books themselves, so your diary stays where it is." },
+        { value: "owner", label: "Don't offer times: I'll arrange it myself", hint: "The reply says you'll be in touch to arrange a time. Nothing goes in your calendar." },
+      ]} />
+      {picked === "link" && (
+        <fieldset disabled={disabled}>
+          <div className="grid two">
+            <label className="field"><span className="label">Booking system</span>
+              <select value={system} onChange={(e) => setSystem(e.target.value)}>{SYSTEMS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+            <label className="field"><span className="label">Your booking page link</span>
+              <input type="url" inputMode="url" placeholder="https://" value={link} onChange={(e) => setLink(e.target.value)} /></label>
+          </div>
+          <p className="hint">Open your {system === "other" ? "" : systemName(system) + " "}booking page as a customer would see it, and copy its web address.</p>
+          <div className="buttons"><button className="primary" disabled={!link.trim() || (link.trim() === config.link && system === config.system && mode === "link")} onClick={saveLink}>Save and use this link</button></div>
+          {mode !== "link" && <p className="note">Not in use until you save a link.</p>}
+        </fieldset>
+      )}
+      {picked === "offer" && !calendar && <p className="note">Google Calendar isn't connected, so for now replies will say you'll arrange the time. <Link to="../connections">Connect it →</Link></p>}
+      <Always items={picked === "link"
+        ? ["Every reply to someone who wants an appointment includes your booking link, even if the AI leaves it out", "No times are suggested: your booking system shows what's free", "Moving a booking always comes to you"]
+        : ["Every time offered is checked against your calendar and working hours first", "Nothing is booked until the customer picks a time and you approve the reply",
+          "Times the customer doesn't pick are released", "Moving a booking always comes to you"]} />
+    </Card>
+  );
+}
 function Approve({ data, canManage, save, busy, reload, only }: { data: any; canManage: boolean; save: (k: string, b: object) => void; busy: boolean; reload: () => void; only?: string }) {
   const { id } = useBiz();
   const a = useAction();

@@ -13,6 +13,16 @@ import { checkatradeSteps, isNewLead, openLead, recordLead, suggestForLead } fro
 import { notifyOwners } from "../outbox.js";
 import { approveOrAsk, categorise, queueNext } from "../automation.js";
 
+export interface BookingConfig { mode?: "owner" | "link"; system?: string; link?: string }
+
+/** Puts the booking link in a reply that left it out: before the sign-off when there is one. */
+export function withBookingLink(reply: string, link: string): string {
+  const line = `You can book a time that suits you here: ${link}`;
+  const parts = reply.trimEnd().split(/\n\n/);
+  if (parts.length > 1 && parts[parts.length - 1].length <= 60) return [...parts.slice(0, -1), line, parts[parts.length - 1]].join("\n\n");
+  return `${reply.trimEnd()}\n\n${line}`;
+}
+
 const ESCALATE_INTENTS = new Set(["emergency", "complaint", "clinical_question"]);
 
 /**
@@ -81,7 +91,10 @@ export async function answerEnquiry(tenantId: string, messageId: string, now = n
       let booking: (BookingResult & { holdIds?: string[] }) | undefined;
       const wantsBooking = ["book_visit", "book_consultation", "confirm_booking", "reschedule"].includes(triage.nextStep);
       // Flows → Booking: "offer times" needs the use case on and a calendar; otherwise the owner arranges the time.
-      const offersTimes = (await useCaseEnabled(db, "book_appointments")) && !!(await calendarConnection(db));
+      const bookingCfg = await one<{ enabled: boolean; config: BookingConfig }>(db, "select enabled, config from tenant_use_cases where use_case = 'book_appointments'");
+      const offersTimes = !!bookingCfg?.enabled && !!(await calendarConnection(db));
+      // Or the business takes bookings in its own system (Halaxy, Cliniko, Fresha...): send its booking link.
+      const bookingLink = !offersTimes && bookingCfg?.config?.mode === "link" ? bookingCfg.config.link : undefined;
       if (wantsBooking && !mustEscalate && triage.inServiceArea !== false && offersTimes) {
         booking = await runAgent<BookingResult>(agents.booking, { message: view, triage, offeredTimes: offered }, ctx, events);
         booking = await applyBooking(db, tenant, booking, msg, offered, now, events);
@@ -98,8 +111,14 @@ export async function answerEnquiry(tenantId: string, messageId: string, now = n
         message: view,
         channel: { kind: msg.channel, replyVia: route, replyStyle: ["whatsapp", "checkatrade_message", "sms"].includes(route) ? "short" : "email" },
         triage, booking: booking ? { action: booking.action, slots: booking.slots } : undefined, proposedSlots: booking?.slots ?? [],
-        bookingPolicy: wantsBooking && !booking ? "owner_arranges" : undefined,
+        bookingPolicy: wantsBooking && !booking ? (bookingLink ? "booking_link" : "owner_arranges") : undefined,
+        bookingLink: wantsBooking && !booking ? bookingLink : undefined,
       }, ctx, events);
+      // The link must be in the reply, whatever the agent wrote.
+      if (wantsBooking && !booking && bookingLink && !draft.replyText.includes(bookingLink)) {
+        draft.replyText = withBookingLink(draft.replyText, bookingLink);
+        events.push({ step: "guard", detail: "added the booking link the reply left out" });
+      }
       const review = await runAgent<ReviewResult>(agents.reviewer, { message: view, triage, proposedSlots: booking?.slots ?? [], draft }, ctx, events);
       const minScore = Math.min(...Object.values(review.scores));
       const passed = review.pass && minScore >= tenant.settings.reviewerPassScore;
