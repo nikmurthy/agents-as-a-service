@@ -193,3 +193,4 @@ button.flow-step.selected { outline: 2px solid var(--brand); outline-offset: 0; 
 .choice input { width: auto; margin-top: .3rem; } .choice > span { display: flex; flex-direction: column; gap: .15rem; }
 .toggle { padding: .25rem 0 .75rem; }
 ul.always li { color: var(--muted); font-size: .9rem; }
+.choice .example { color: var(--text); font-size: .88rem; font-style: italic; background: #fff; border-left: 3px solid var(--line); padding: .2rem .5rem; margin-top: .25rem; }

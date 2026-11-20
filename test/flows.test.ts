@@ -194,6 +194,19 @@ test("withBookingLink puts the link before a short sign-off", () => {
   assert.equal(withBookingLink("Hi Jo, thanks. Mark", "https://x.example/b"), "Hi Jo, thanks. Mark\n\nYou can book a time that suits you here: https://x.example/b");
 });
 
+test("reply style reaches the reply writer: greeting, length, examples as style only", async () => {
+  const { tenantSummary } = await import("../src/agents/runner.js");
+  const tenant = await withTenant(A, (db) => one(db, "select id, slug, name, pack, settings, status from tenants where id = app_current_tenant()"));
+  tenant.settings.replyStyle = { greeting: "hello", length: "short", emoji: "never", spelling: "american", avoid: "cheap", examples: ["Hello there, happy to help. Mark"] };
+  const text = tenantSummary(tenant, new Date());
+  assert.match(text, /Greeting: start with "Hello <first name>,"/);
+  assert.match(text, /Reply length: short/);
+  assert.match(text, /Emoji: never use emoji/);
+  assert.match(text, /Spelling: American English/);
+  assert.match(text, /never to use: cheap/);
+  assert.match(text, /Never copy facts, prices, names, dates or promises from them:\n<example 1>\nHello there, happy to help. Mark\n<\/example 1>/);
+});
+
 test("automations are kept per business", async () => {
   const seenByB = await withTenant(B, (db) => many(db, "select * from automations"));
   assert.equal(seenByB.length, 0);

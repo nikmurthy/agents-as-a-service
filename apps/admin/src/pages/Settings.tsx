@@ -43,7 +43,7 @@ function Form({ id, initial, canEdit }: { id: string; initial: any; canEdit: boo
           </Card>
 
           <Card title="How replies sound">
-            <Field label="Tone of voice"><textarea rows={3} value={s.tone ?? ""} onChange={(e) => set("tone", e.target.value)} /></Field>
+            <Field label="Tone of voice" hint="More choices, with examples, in Flows → Reply."><textarea rows={3} value={s.tone ?? ""} onChange={(e) => set("tone", e.target.value)} /></Field>
             <Field label="Sign-off"><input value={s.signOff ?? ""} onChange={(e) => set("signOff", e.target.value)} /></Field>
             <Field label="Anything else the assistant should know when replying" hint="Optional. Rules, policies, things never to say."><textarea rows={4} value={s.replyGuidance ?? ""} onChange={(e) => set("replyGuidance", e.target.value || undefined)} /></Field>
           </Card>

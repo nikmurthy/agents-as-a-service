@@ -41,7 +41,7 @@ export function Flows() {
     { key: "arrive", title: "Message arrives", sub: "Email, WhatsApp, form, Checkatrade, texts", tone: "in" },
     { key: "triage", title: "Triage", sub: "What is it? How urgent?" },
     { key: "booking", title: "Booking", sub: bookingMode === "link" ? `Sends your ${systemName(bk.system)} booking link` : offersTimes && calendar ? "Offers free times" : "You arrange the time", setting: true },
-    { key: "reply", title: "Reply", sub: "Written in your voice, then checked" },
+    { key: "reply", title: "Reply", sub: `${PRESETS.find((p) => p.key === data.reply.style.preset)?.label ?? "Your tone of voice"}, then checked`, setting: true },
     { key: "approve", title: "You approve", sub: data.learnAfter === 0 ? "Always asks you" : `Learns: offers to automate after ${data.learnAfter}`, tone: "you", setting: true },
     { key: "sent", title: "Sent", sub: "By email or WhatsApp, or you send it", tone: "out" },
     { key: "feedback", title: "Feedback", sub: uc.ask_feedback.enabled ? `Asks how it went, ${dayWord(uc.ask_feedback.config.afterDays ?? data.defaults.feedbackAfterDays)}` : "Off", setting: true },
@@ -97,13 +97,7 @@ export function Flows() {
 
       {flow === "enquiry" && current.key === "booking" && <Booking mode={bookingMode} config={bk} calendar={calendar} save={save} disabled={ro} />}
 
-      {flow === "enquiry" && current.key === "reply" && (
-        <Card title="Reply">
-          <p>Written in your tone of voice, using your services, prices and sign-off. A second, stronger model then checks it for accuracy, tone and safety.</p>
-          <Always items={["Never makes up prices or services you haven't listed", "Drafts that score low are flagged for you to look at closely", "Never sends anything by itself: that's the next step"]} />
-          <Link to="../settings">Your tone, services and prices are in Settings →</Link>
-        </Card>
-      )}
+      {flow === "enquiry" && current.key === "reply" && <Reply reply={data.reply} disabled={ro} onSaved={reload} />}
 
       {current.key === "approve" && <Approve data={data} canManage={canManage} save={save} busy={a.busy} reload={reload} only={flow === "quotes" ? "quote_followup" : undefined} />}
 
@@ -189,6 +183,99 @@ function Booking({ mode, config, calendar, save, disabled }: { mode: string; con
     </Card>
   );
 }
+// Three ready-made tones, each with an example so the owner can hear the difference.
+const PRESETS = [
+  { key: "friendly", label: "Warm and friendly", tone: "Warm, friendly and personal, like a helpful local business. Conversational, short sentences, no jargon.",
+    trade: "Hi Sam, thanks for getting in touch! Happy to help with your kitchen floor. Could you send a couple of photos and rough room sizes? Then I can give you a price guide and pop round to measure up.",
+    practice: "Hi Sam, thanks so much for reaching out! I'd love to help. Could you tell me a little about what you're hoping to work on? Then I can suggest the best place to start." },
+  { key: "professional", label: "Professional and polished", tone: "Polite, professional and reassuring. Clear and well structured. Courteous, never casual.",
+    trade: "Hello Sam, thank you for your enquiry about your kitchen floor. So that we can give you an accurate quote, could you send a few photos and the approximate room dimensions? We can then arrange a free measure-up at a time that suits you.",
+    practice: "Hello Sam, thank you for your enquiry. To make sure an initial consultation is right for you, could you share a brief outline of what you would like support with? I will then explain the next steps." },
+  { key: "brief", label: "Short and to the point", tone: "Brief and direct. As few words as possible while still being friendly. No small talk.",
+    trade: "Hi Sam, thanks. Can you send photos and room sizes? I'll then give you a price and a time to measure up.",
+    practice: "Hi Sam, thanks for getting in touch. What would you like help with? I'll then suggest next steps." },
+] as const;
+
+function Reply({ reply, disabled, onSaved }: { reply: any; disabled: boolean; onSaved: () => void }) {
+  const { id } = useBiz();
+  const st = reply.style ?? {};
+  const [preset, setPreset] = useState<string>(st.preset ?? (PRESETS.find((p) => p.tone === reply.tone)?.key ?? "custom"));
+  const [tone, setTone] = useState<string>(reply.tone);
+  const [greeting, setGreeting] = useState<string>(st.greeting ?? "");
+  const [length, setLength] = useState<string>(st.length ?? "");
+  const [emoji, setEmoji] = useState<string>(st.emoji ?? "");
+  const [spelling, setSpelling] = useState<string>(st.spelling ?? "british");
+  const [avoid, setAvoid] = useState<string>(st.avoid ?? "");
+  const [examples, setExamples] = useState<string[]>(() => { const e = [...(st.examples ?? [])]; while (e.length < 3) e.push(""); return e; });
+  const a = useAction();
+  const sample = reply.pack === "practitioner" ? "practice" : "trade";
+  const sign = reply.signOff && !reply.signOff.includes("[") ? reply.signOff : "Your name";
+  const pick = (k: string) => { setPreset(k); const p = PRESETS.find((x) => x.key === k); if (p) setTone(p.tone); };
+  const save = () => a.run(async () => {
+    const style: any = { preset, spelling, avoid: avoid.trim() || undefined, examples: examples.map((e) => e.trim()).filter(Boolean) };
+    if (greeting) style.greeting = greeting; if (length) style.length = length; if (emoji) style.emoji = emoji;
+    const r = await put(`/businesses/${id}/reply-style`, { tone: tone.trim(), style });
+    setExamples(() => { const e = [...(r.style.examples ?? [])]; while (e.length < 3) e.push(""); return e; });
+    onSaved();
+  }, "Saved. New replies will be written this way.");
+  return (
+    <Card title="Reply: how it sounds">
+      <p className="muted small">Each reply is written in your voice, using your services, prices and sign-off from <Link to="../settings">Settings</Link>, then a second, stronger model checks it for accuracy, tone and safety.</p>
+      <fieldset disabled={disabled || a.busy}>
+        <h3>1. Pick a tone</h3>
+        <div className="choices">
+          {PRESETS.map((p) => (
+            <label key={p.key} className={`choice ${preset === p.key ? "on" : ""}`}>
+              <input type="radio" name="tone" checked={preset === p.key} onChange={() => pick(p.key)} />
+              <span><strong>{p.label}</strong><span className="example">"{p[sample]} {sign}"</span></span>
+            </label>
+          ))}
+          <label className={`choice ${preset === "custom" ? "on" : ""}`}>
+            <input type="radio" name="tone" checked={preset === "custom"} onChange={() => setPreset("custom")} />
+            <span><strong>Describe it in my own words</strong><span className="hint">For example "Chatty and upbeat, like talking to a neighbour".</span></span>
+          </label>
+        </div>
+        {preset === "custom" && <label className="field"><span className="label">Your tone of voice</span><textarea rows={3} value={tone} onChange={(e) => setTone(e.target.value)} /></label>}
+
+        <h3>2. The details</h3>
+        <div className="grid two">
+          <label className="field"><span className="label">Greeting</span>
+            <select value={greeting} onChange={(e) => setGreeting(e.target.value)}>
+              <option value="">Whatever fits</option><option value="hi">Hi Sam,</option><option value="hello">Hello Sam,</option><option value="dear">Dear Sam,</option>
+            </select></label>
+          <label className="field"><span className="label">Length</span>
+            <select value={length} onChange={(e) => setLength(e.target.value)}>
+              <option value="">Whatever fits</option><option value="short">Short: a few sentences</option><option value="medium">Medium: a paragraph or two</option><option value="detailed">Detailed: answer everything</option>
+            </select></label>
+          <label className="field"><span className="label">Emoji</span>
+            <select value={emoji} onChange={(e) => setEmoji(e.target.value)}>
+              <option value="">Whatever fits</option><option value="never">Never</option><option value="sometimes">Now and then on WhatsApp and texts</option>
+            </select></label>
+          <label className="field"><span className="label">Spelling</span>
+            <select value={spelling} onChange={(e) => setSpelling(e.target.value)}>
+              <option value="british">British (colour, organise)</option><option value="american">American (color, organize)</option>
+            </select></label>
+        </div>
+        <label className="field"><span className="label">Words or phrases never to use</span>
+          <span className="hint">Optional. For example "cheap, no worries, ASAP".</span>
+          <input value={avoid} onChange={(e) => setAvoid(e.target.value)} maxLength={500} /></label>
+
+        <h3>3. Write like me (optional)</h3>
+        <p className="hint">Paste up to three replies you've sent that sound like you. The assistant copies your style, not the content. Email addresses and phone numbers are removed when you save; take out customers' names too.</p>
+        {examples.slice(0, Math.min(3, examples.filter((x) => x.trim()).length + 1)).map((e, i) => (
+          <label key={i} className="field"><span className="label">Example {i + 1}</span>
+            <textarea rows={4} maxLength={1500} value={e} placeholder={i === 0 ? "Paste a reply you've written…" : ""}
+              onChange={(ev) => setExamples(examples.map((x, j) => (j === i ? ev.target.value : x)))} /></label>
+        ))}
+        <div className="buttons"><button className="primary" disabled={!tone.trim()} onClick={save}>Save how replies sound</button></div>
+      </fieldset>
+      <ErrorNote message={a.error} />
+      {a.done && <p className="note good">{a.done}</p>}
+      <Always items={["Never makes up prices or services you haven't listed", "Drafts that score low are flagged for you to look at closely", "Never sends anything by itself: that's the next step"]} />
+    </Card>
+  );
+}
+
 function Approve({ data, canManage, save, busy, reload, only }: { data: any; canManage: boolean; save: (k: string, b: object) => void; busy: boolean; reload: () => void; only?: string }) {
   const { id } = useBiz();
   const a = useAction();
