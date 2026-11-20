@@ -3,6 +3,7 @@ import { audit } from "./audit.js";
 import { enqueue } from "./jobs/queue.js";
 import { releaseHold } from "./calendar.js";
 import { decideLead } from "./leads.js";
+import { afterDecision, type Category } from "./automation.js";
 
 // The one place a draft is approved, edited or rejected. The WhatsApp buttons and the web app both call
 // these, so the two can never disagree about what a decision does.
@@ -15,7 +16,9 @@ export interface Actor {
 }
 
 export type DecisionResult =
-  | { ok: true; customer: string; route: string; lead?: { job_url: string | null; suggestion_reason: string | null; decision: "interested" | "not_for_me" } }
+  | { ok: true; customer: string; route: string; lead?: { job_url: string | null; suggestion_reason: string | null; decision: "interested" | "not_for_me" };
+      /** "Learn then offer to automate": a note for the owner, and the kind of reply to offer, if any. */
+      automation?: { text: string; offer?: Category } }
   | { ok: false; reason: "not_found" | "already_decided"; status?: string };
 
 type Decision = { kind: "approve" } | { kind: "reject" } | { kind: "edit"; body: string };
@@ -52,6 +55,7 @@ async function decide(tenantId: string, actor: Actor, draftId: string, decision:
   if (result.ok && decision.kind !== "reject") {
     await enqueue("send_outbox", { tenantId, draftId }, { jobKey: `outbox:${draftId}` });
   }
+  if (result.ok) result.automation = await afterDecision(tenantId, draftId, actor.memberId);
   return result;
 }
 

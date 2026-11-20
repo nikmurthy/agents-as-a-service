@@ -5,6 +5,7 @@ import { getConnection, googleToken, platformWaSender, tenantWaSender } from "./
 import { approvers } from "./tenants.js";
 import { audit } from "./audit.js";
 import { checkatradeSteps, openLead } from "./leads.js";
+import { notifyAutoSent } from "./automation.js";
 
 /**
  * Sends an approved draft by its route. WhatsApp and email go automatically. Checkatrade, text and phone
@@ -39,6 +40,8 @@ export async function sendOutbox(tenantId: string, draftId: string, attempt = 1,
         "insert into messages (tenant_id, conversation_id, direction, channel, channel_message_id, body, received_at) values (app_current_tenant(), $1, 'out', $2, $3, $4, now())",
         [d.conversation_id, d.reply_route, providerId ?? null, d.body]);
       await audit(db, { tenantId, actor: "system", action: `reply.${status}`, entity: "draft", entityId: draftId, detail: { route: d.reply_route } });
+      // Sent without asking (the owner automated this kind): tell them, so nothing goes unseen.
+      if (d.auto_sent) await notifyAutoSent(db, d.customer, d.reply_route, d.category, d.body);
     };
 
     if (to && (await one(db, "select 1 from suppression where value = $1", [to]))) return fail("this person has opted out of messages", true);

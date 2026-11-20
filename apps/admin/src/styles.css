@@ -80,7 +80,7 @@ h3 { font-size: .9rem; margin: .25rem 0; color: var(--muted); }
 .card ul { margin: .25rem 0 .75rem; padding-left: 1.1rem; } .card li { margin: .15rem 0; }
 
 .flow { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; counter-reset: step; }
-@media (min-width: 720px) { .flow { grid-template-columns: repeat(7, 1fr); gap: .4rem; } }
+@media (min-width: 720px) { .flow { grid-template-columns: repeat(7, 1fr); gap: .4rem; } .flow.flow-5 { grid-template-columns: repeat(5, 1fr); } }
 .flow-step { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: .55rem .6rem; background: #f8f9fb; font-size: .85rem; display: flex; flex-direction: column; gap: .15rem; }
 .flow-step strong { font-size: .92rem; } .flow-step span { color: var(--muted); } .flow-step em { color: var(--warn); font-style: normal; font-size: .8rem; }
 .flow-step.in { background: #eef3ff; } .flow-step.you { background: var(--warn-bg); border-color: #f1d9a6; } .flow-step.out { background: var(--good-bg); border-color: #b9e3c8; }
@@ -178,3 +178,18 @@ pre.instructions { white-space: pre-wrap; background: #f8f9fb; border: 1px solid
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: .75rem; }
 .form-row label { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; }
 @media (max-width: 560px) { .form-row { grid-template-columns: 1fr; } }
+
+/* Flows page: the steps are buttons; the selected one shows its details below. */
+.flow > li { display: flex; position: relative; }
+ol.flow:has(button.flow-step) { gap: .3rem; margin-bottom: 1rem; }
+button.flow-step { width: 100%; text-align: left; min-height: 0; align-items: flex-start; justify-content: flex-start; margin: 0; padding: .45rem .6rem; }
+@media (max-width: 719px) { button.flow-step { flex-direction: row; flex-wrap: wrap; column-gap: .5rem; } }
+button.flow-step:hover { border-color: var(--brand); }
+button.flow-step.selected { outline: 2px solid var(--brand); outline-offset: 0; }
+@media (min-width: 720px) { .flow > li:not(.flow-step):not(:last-child)::after { content: "→"; position: absolute; right: -.5rem; top: .6rem; color: var(--muted); line-height: 1; z-index: 1; } }
+.choices { display: grid; gap: .5rem; margin-bottom: .85rem; }
+.choice { display: flex; gap: .6rem; align-items: flex-start; border: 1px solid var(--line); border-radius: 8px; padding: .6rem .75rem; cursor: pointer; }
+.choice.on { border-color: var(--brand); background: #f1f4ff; }
+.choice input { width: auto; margin-top: .3rem; } .choice > span { display: flex; flex-direction: column; gap: .15rem; }
+.toggle { padding: .25rem 0 .75rem; }
+ul.always li { color: var(--muted); font-size: .9rem; }

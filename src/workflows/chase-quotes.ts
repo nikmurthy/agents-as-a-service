@@ -1,7 +1,7 @@
 import { many, one, withAdmin, withTenant } from "../db.js";
 import { loadTenant, useCaseEnabled } from "../tenants.js";
 import { audit } from "../audit.js";
-import { enqueue } from "../jobs/queue.js";
+import { approveOrAsk, queueNext, type NextStep } from "../automation.js";
 import { chooseRoute } from "./answer-enquiry.js";
 import type { Tenant } from "../types.js";
 
@@ -29,7 +29,8 @@ export async function chaseAllQuotes(): Promise<void> {
 }
 
 export async function chaseQuotes(tenantId: string, now = new Date()): Promise<number> {
-  return withTenant(tenantId, async (db) => {
+  const next: NextStep[] = [];
+  const made = await withTenant(tenantId, async (db) => {
     if (!(await useCaseEnabled(db, "chase_quotes"))) return 0;
     const cfg = await one<{ config: { afterDays?: number } }>(db, "select config from tenant_use_cases where use_case = 'chase_quotes'");
     const afterDays = Math.max(1, Math.min(Number(cfg?.config?.afterDays) || CHASE_AFTER_DAYS, STALE_AFTER_DAYS));
@@ -60,13 +61,15 @@ export async function chaseQuotes(tenantId: string, now = new Date()): Promise<n
       const route = await chooseRoute(db, tenant, c.channel ?? "email", { email: c.email, phone: c.phone }, { whatsappOpen: windowOpen });
       const body = chaseWording(tenant, c.name);
       const d = await one<{ id: string }>(db,
-        `insert into drafts (tenant_id, conversation_id, kind, reply_route, body, original_body)
-         values (app_current_tenant(), $1, 'chase', $2, $3, $3) returning id`, [c.id, route, body]);
+        `insert into drafts (tenant_id, conversation_id, kind, category, reply_route, body, original_body)
+         values (app_current_tenant(), $1, 'chase', 'quote_followup', $2, $3, $3) returning id`, [c.id, route, body]);
       await db.query("update conversations set chased_at = $2 where id = $1", [c.id, now]);
       await audit(db, { tenantId, actor: "system", action: "chase.drafted", entity: "draft", entityId: d!.id, detail: { route } });
-      await enqueue("send_approval", { tenantId, draftId: d!.id }, { jobKey: `approval:${d!.id}`, maxAttempts: 8 });
+      next.push(await approveOrAsk(db, tenant, d!.id));
       made++;
     }
     return made;
   });
+  for (const n of next) await queueNext(n); // after the commit: the queue uses its own connection
+  return made;
 }

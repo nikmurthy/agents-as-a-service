@@ -5,6 +5,7 @@ import { sendApproval } from "../approvals.js";
 import { sendOutbox } from "../outbox.js";
 import { pollAllGmail } from "../channels/gmail-poll.js";
 import { chaseAllQuotes } from "../workflows/chase-quotes.js";
+import { askAllFeedback } from "../workflows/ask-feedback.js";
 import { releaseHold } from "../calendar.js";
 import { audit } from "../audit.js";
 import { enqueue } from "./queue.js";
@@ -19,6 +20,9 @@ export const taskList: TaskList = {
 
   /** Draft one follow-up for each quote that has gone quiet. */
   chase_quotes: async () => { await chaseAllQuotes(); },
+
+  /** Ask customers how it went, once their job is done. */
+  ask_feedback: async () => { await askAllFeedback(); },
 
   /** Release held times the customer didn't pick in time. */
   expire_holds: async () => {
@@ -55,4 +59,5 @@ export const crontab = [
   "*/5 * * * * sweep_unprocessed",
   "30 3 * * * retention",
   "0 9 * * * chase_quotes",
+  "0 10 * * * ask_feedback",
 ].join("\n");

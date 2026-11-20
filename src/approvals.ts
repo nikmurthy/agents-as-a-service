@@ -7,6 +7,7 @@ import { audit } from "./audit.js";
 import { approveDraft, editAndApproveDraft, rejectDraft, type Actor } from "./decisions.js";
 import type { WaInbound } from "./channels/parse.js";
 import { addContactDetails, checkatradeSteps, findContactDetails, openLead } from "./leads.js";
+import { answerOffer, sendOffer } from "./automation.js";
 
 // Owners approve drafts on WhatsApp, from the platform's own number.
 // Inside WhatsApp's 24-hour window (the owner messaged us recently) we send interactive buttons.
@@ -32,9 +33,10 @@ export async function sendApproval(tenantId: string, draftId: string): Promise<v
       return;
     }
     const first = (d.customer ?? "A customer").split(/\s+/)[0];
-    const head = d.kind === "chase"
-      ? `Quote follow-up for ${first}: no reply since you sent the quote.`
-      : `${d.needs_attention ? "⚠️ " + d.attention_reason + "\n\n" : ""}${CHANNEL_LABEL[d.channel] ?? "New"} message from ${first}:\n"${clip(d.inbound ?? "", 300)}"`;
+    const note = d.needs_attention ? "⚠️ " + d.attention_reason + "\n\n" : d.attention_reason ? "🔎 " + d.attention_reason + "\n\n" : "";
+    const head = d.kind === "chase" ? `${note}Quote follow-up for ${first}: no reply since you sent the quote.`
+      : d.kind === "feedback" ? `${note}Ask ${first} for feedback? Their job is done.`
+      : `${note}${CHANNEL_LABEL[d.channel] ?? "New"} message from ${first}:\n"${clip(d.inbound ?? "", 300)}"`;
     const draftBlock = `Reply by ${ROUTE_LABEL[d.reply_route] ?? d.reply_route}:\n${d.body}`;
     // A new Checkatrade lead: the same three buttons, but Approve means "I'm interested" and Reject means "Not for me".
     const lead = d.channel === "checkatrade" && d.kind === "reply" ? await openLead(db, d.conversation_id) : undefined;
@@ -59,7 +61,7 @@ export async function sendApproval(tenantId: string, draftId: string): Promise<v
       } else {
         // Template body (set up once in Meta): "{{1}}: new message from {{2}}. Draft reply: {{3}}" with buttons Approve / Edit / Reject.
         sent = await clients.whatsapp.sendTemplate(platformWaSender(), p.whatsapp_phone, env.approvalTemplateName, env.approvalTemplateLang,
-          [d.business, `${first} (${d.kind === "chase" ? "quote follow-up" : CHANNEL_LABEL[d.channel] ?? "message"})${d.needs_attention ? " ⚠️ " + d.attention_reason : ""}${isLead ? advice.replace(/\n+/g, " ") + ". Approve = I'm interested, Reject = Not for me" : ""}`, clip(d.body, 700)],
+          [d.business, `${first} (${d.kind === "chase" ? "quote follow-up" : d.kind === "feedback" ? "feedback request" : CHANNEL_LABEL[d.channel] ?? "message"})${d.needs_attention ? " ⚠️ " + d.attention_reason : ""}${isLead ? advice.replace(/\n+/g, " ") + ". Approve = I'm interested, Reject = Not for me" : ""}`, clip(d.body, 700)],
           buttons.map((b) => b.id));
       }
       await db.query("insert into approval_requests (tenant_id, draft_id, member_id, wa_message_id) values (app_current_tenant(), $1, $2, $3)", [draftId, p.id, sent.id]);
@@ -76,6 +78,16 @@ export async function handleOwnerMessage(w: WaInbound): Promise<void> {
   if (!members.length) return; // not someone we know: ignore
   await withAdmin((db) => db.query("update tenant_members set approver_last_inbound_at = now() where whatsapp_phone = $1", [w.from]));
 
+  // Answer to "Want me to send replies like these automatically?"
+  const offer = w.buttonId?.match(/^au:([yn]):([0-9a-f-]{36}):([a-z_]+)$/);
+  if (offer) {
+    const [, yn, tenantId, category] = offer;
+    const member = members.find((m) => m.tenant_id === tenantId);
+    if (!member) return void (await reply("Sorry, I couldn't find that business."));
+    await reply(await answerOffer(tenantId, category, yn === "y", member.id, `member:${member.id}`));
+    return;
+  }
+
   const button = w.buttonId?.match(/^([aer]):([0-9a-f-]{36})$/);
   if (button) {
     const [, action, draftId] = button;
@@ -83,7 +95,8 @@ export async function handleOwnerMessage(w: WaInbound): Promise<void> {
     const member = members.find((m) => m.tenant_id === owner?.tenant_id);
     if (!owner || !member) return void (await reply("Sorry, I couldn't find that draft."));
     const result = await decide(owner.tenant_id, member.id, draftId, action as "a" | "e" | "r");
-    if (result) await reply(result);
+    if (result.text) await reply(result.text);
+    await tellAutomation(owner.tenant_id, w.from, result.automation);
     return;
   }
 
@@ -95,6 +108,7 @@ export async function handleOwnerMessage(w: WaInbound): Promise<void> {
     if (pending) {
       const r = await editAndApproveDraft(pending.tenant_id, memberActor(pending.member_id), pending.draft_id, w.text);
       await reply(r.ok ? "Got it. Sending your version now ✓" : "That draft has already been dealt with.");
+      if (r.ok) await tellAutomation(pending.tenant_id, w.from, r.automation);
       return;
     }
   }
@@ -122,28 +136,36 @@ export async function handleOwnerMessage(w: WaInbound): Promise<void> {
 
 const memberActor = (memberId: string): Actor => ({ memberId, audit: `member:${memberId}` });
 
-async function decide(tenantId: string, memberId: string, draftId: string, action: "a" | "e" | "r"): Promise<string | undefined> {
+async function tellAutomation(tenantId: string, to: string, a: { text: string; offer?: string } | undefined) {
+  if (!a) return;
+  if (a.offer) await sendOffer(tenantId, a.offer, to, a.text);
+  else await clients.whatsapp.sendText(platformWaSender(), to, a.text);
+}
+
+type Outcome = { text?: string; automation?: { text: string; offer?: string } };
+const say = (text: string): Outcome => ({ text });
+
+async function decide(tenantId: string, memberId: string, draftId: string, action: "a" | "e" | "r"): Promise<Outcome> {
   const actor = memberActor(memberId);
   const info = await withTenant(tenantId, (db) => one<{ status: string; reply_route: string; customer: string }>(db,
     `select d.status, d.reply_route, coalesce(ct.name, 'the customer') as customer from drafts d
      join conversations c on c.id = d.conversation_id join contacts ct on ct.id = c.contact_id where d.id = $1`, [draftId]));
-  if (!info) return "Sorry, I couldn't find that draft.";
+  if (!info) return say("Sorry, I couldn't find that draft.");
   const first = info.customer.split(/\s+/)[0];
 
   if (action === "e") {
-    if (info.status !== "pending_approval") return `Already ${info.status.replace("_", " ")}.`;
+    if (info.status !== "pending_approval") return say(`Already ${info.status.replace("_", " ")}.`);
     await withTenant(tenantId, (db) => db.query("update approval_requests set state = 'awaiting_edit', updated_at = now() where draft_id = $1 and member_id = $2", [draftId, memberId]));
-    return `OK. Send me the reply to ${first} exactly as you want it to go.`;
+    return say(`OK. Send me the reply to ${first} exactly as you want it to go.`);
   }
   const r = action === "r" ? await rejectDraft(tenantId, actor, draftId) : await approveDraft(tenantId, actor, draftId);
-  if (!r.ok) return r.reason === "not_found" ? "Sorry, I couldn't find that draft." : `Already ${(r.status ?? "dealt with").replace("_", " ")}.`;
-  if (action === "r") return r.lead
-    ? `OK, not for you. Nothing was sent to ${first}. In Checkatrade:\n${checkatradeSteps(r.lead, "not_for_me")}`
-    : `Rejected. Nothing was sent to ${first}.`;
-  if (!["whatsapp", "email"].includes(r.route)) return undefined; // Checkatrade, text, phone: the outbox sends the steps
-  return r.lead
-    ? `Sending to ${first} by ${r.route} now ✓ In Checkatrade, also tap "I'm interested" on the job${r.lead.job_url ? `: ${r.lead.job_url}` : ""}`
+  if (!r.ok) return say(r.reason === "not_found" ? "Sorry, I couldn't find that draft." : `Already ${(r.status ?? "dealt with").replace("_", " ")}.`);
+  const text = action === "r"
+    ? r.lead ? `OK, not for you. Nothing was sent to ${first}. In Checkatrade:\n${checkatradeSteps(r.lead, "not_for_me")}` : `Rejected. Nothing was sent to ${first}.`
+    : !["whatsapp", "email"].includes(r.route) ? undefined // Checkatrade, text, phone: the outbox sends the steps
+    : r.lead ? `Sending to ${first} by ${r.route} now ✓ In Checkatrade, also tap "I'm interested" on the job${r.lead.job_url ? `: ${r.lead.job_url}` : ""}`
     : `Approved. Sending to ${first} now ✓`;
+  return { text, automation: r.automation };
 }
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);

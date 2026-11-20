@@ -42,7 +42,7 @@ export function Agents() {
   const pinned = data.pinned.filter((t: any) => t.pinned);
   return (
     <Page title="Agents">
-      <p className="lead">Four agents work on every enquiry, one after another. They judge; the code decides. Nothing reaches a customer until a person approves it.</p>
+      <p className="lead">Four agents work on every enquiry, one after another. They judge; the code decides. Each business chooses how its steps work (booking, approvals, automation, feedback) on its own <strong>Flows</strong> tab.</p>
 
       <Card title="How an enquiry is handled">
         <ol className="flow">

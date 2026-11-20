@@ -322,6 +322,36 @@ test("webhook links are created and shown to owners", async () => {
   assert.equal(hit.status, 404, "a disabled form link stops working");
 });
 
+test("flows: owners set each step's choices and automation; staff can look; other businesses can't", async () => {
+  const flows = (await api("staffA", "GET", `/businesses/${A}/flows`)).json;
+  assert.equal(flows.canManage, false);
+  assert.equal(flows.learnAfter, 5, "default: offer after 5 unchanged approvals");
+  assert.deepEqual(flows.kinds.map((k: any) => k.key), ["answer_question", "offer_times", "confirm_booking", "quote_followup", "feedback_request"]);
+  assert.equal((await api("staffA", "PUT", `/businesses/${A}/flows/ask_feedback`, { enabled: true })).status, 403);
+
+  const fb = await api("ownerA", "PUT", `/businesses/${A}/flows/ask_feedback`, { enabled: true, config: { afterDays: 2, reviewLink: "https://g.page/r/abc/review" } });
+  assert.equal(fb.status, 200);
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/flows/ask_feedback`, { config: { reviewLink: "http://not-secure.example" } })).status, 400);
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/flows/answer_enquiries`, { config: { learnAfter: 3 } })).status, 200);
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/flows/answer_enquiries`, { config: { autoSendEverything: true } })).status, 400, "unknown settings refused");
+  const after = (await api("ownerA", "GET", `/businesses/${A}/flows`)).json;
+  assert.deepEqual(after.useCases.ask_feedback, { enabled: true, config: { afterDays: 2, reviewLink: "https://g.page/r/abc/review" } });
+  assert.equal(after.learnAfter, 3);
+  assert.match(after.feedbackPreview, /https:\/\/g\.page\/r\/abc\/review/);
+
+  // Clearing the review link removes it.
+  await api("ownerA", "PUT", `/businesses/${A}/flows/ask_feedback`, { config: { reviewLink: "" } });
+  assert.deepEqual((await api("ownerA", "GET", `/businesses/${A}/flows`)).json.useCases.ask_feedback.config, { afterDays: 2 });
+
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/automations/answer_question`, { on: true })).status, 200);
+  assert.equal((await api("ownerA", "GET", `/businesses/${A}/flows`)).json.kinds[0].state, "on");
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/automations/anything_goes`, { on: true })).status, 400);
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/automations/answer_question`, { on: false })).status, 200);
+
+  assert.equal((await api("ownerB", "GET", `/businesses/${A}/flows`)).status, 404);
+  assert.equal((await api("ownerB", "PUT", `/businesses/${A}/automations/answer_question`, { on: true })).status, 404);
+});
+
 test("people: the last owner can't be removed or demoted; approvers need a WhatsApp number", async () => {
   const members = (await api("ownerA", "GET", `/businesses/${A}/members`)).json.members;
   const owner = members.find((m: any) => m.role === "owner");
