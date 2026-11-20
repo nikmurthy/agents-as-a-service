@@ -150,6 +150,8 @@ export function parseCheckatradeEmail(e: { subject?: string; html?: string; text
   const isEnquiry = !!found.description || !!contact.phone || !!contact.email || !!found.reference || ENQUIRY.test(subject);
   if ((NOT_ENQUIRY.test(subject) && !found.description) || !isEnquiry) return null;
   structured["Checkatrade email"] = isMessage ? "Message from the customer" : "New lead";
+  const link = checkatradeJobLink(`${e.html ?? ""}\n${e.text ?? ""}`);
+  if (link) structured["Job link"] = link;
   for (const k of ["name", "phone", "email"]) delete structured[k];
   return {
     channel: "checkatrade",
@@ -160,11 +162,21 @@ export function parseCheckatradeEmail(e: { subject?: string; html?: string; text
   };
 }
 
+/** The first link to a job in Checkatrade's members' app (the trade's view of the job), if there is one. */
+export function checkatradeJobLink(s: string): string | undefined {
+  for (const m of s.matchAll(/https:\/\/(?:[a-z0-9-]+\.)*checkatrade\.com\/[^\s"'<>)]*/gi)) {
+    const url = m[0].replace(/&amp;/g, "&").replace(/[.,]+$/, "");
+    if (/members|\/jobs?\//i.test(url) && !/unsubscribe|preferences|support|blog/i.test(url)) return url.slice(0, 500);
+  }
+  return undefined;
+}
+
 /** Checkatrade lead delivery webhook (strategic accounts). */
 export function parseCheckatradeWebhook(raw: any): InboundMessage {
-  const structured: Record<string, string> = {
+  const structured: Record<string, string | undefined> = {
     Job: raw.title, Category: raw.category, Postcode: raw.postcode,
     "Preferred start": raw.preferredStart?.option, "Lead type": raw.source,
+    "Job reference": raw.jobId, "Job link": typeof raw.tradeWebUrl === "string" ? checkatradeJobLink(raw.tradeWebUrl) : undefined,
   };
   for (const qa of raw.additionalInformation ?? []) structured[qa.question] = qa.answer;
   return {
@@ -174,7 +186,7 @@ export function parseCheckatradeWebhook(raw: any): InboundMessage {
     from: { name: raw.customerName, email: normaliseEmail(raw.customerEmail), phone: normalisePhone(raw.customerPhone) },
     subject: raw.title,
     text: raw.jobDescription ?? "",
-    structured: Object.fromEntries(Object.entries(structured).filter(([, v]) => v)),
+    structured: Object.fromEntries(Object.entries(structured).filter(([, v]) => v)) as Record<string, string>,
     attachments: (raw.media ?? []).map((url: string) => ({ url, kind: "image" })),
   };
 }

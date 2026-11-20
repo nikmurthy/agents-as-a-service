@@ -10,6 +10,8 @@ import { calendarConnection, confirmHold, createHold, isFree, openHolds, release
 import { getConnection } from "../connections.js";
 import { audit } from "../audit.js";
 import { enqueue } from "../jobs/queue.js";
+import { checkatradeSteps, isNewLead, openLead, recordLead, suggestForLead } from "../leads.js";
+import { notifyOwners } from "../outbox.js";
 
 const ESCALATE_INTENTS = new Set(["emergency", "complaint", "clinical_question"]);
 
@@ -31,7 +33,7 @@ export async function answerEnquiry(tenantId: string, messageId: string, now = n
       return;
     }
     const msg = await one(db,
-      `select m.*, c.contact_id, c.id as conv_id, ct.name as contact_name,
+      `select m.*, c.contact_id, c.id as conv_id, c.whatsapp_window_closes_at, ct.name as contact_name,
               (select value from contact_identities i where i.contact_id = c.contact_id and kind = 'email' limit 1) as email,
               (select value from contact_identities i where i.contact_id = c.contact_id and kind = 'phone' limit 1) as phone,
               exists (select 1 from messages p where p.conversation_id = c.id and p.id <> m.id) as known
@@ -63,7 +65,16 @@ export async function answerEnquiry(tenantId: string, messageId: string, now = n
 
       // 1. Triage
       const triage = await runAgent<TriageResult>(agents.triage, { message: view, knownCustomer: msg.known, offeredTimes: offered, services: tenant.settings.services.map((s) => s.name) }, ctx, events);
-      if (triage.intent === "spam" || triage.nextStep === "ignore") return finish("ignored", "Spam or irrelevant.", { triage });
+      // A new Checkatrade lead: suggest "I'm interested" or "Not for me" (the owner does it in Checkatrade by hand).
+      const lead = msg.channel === "checkatrade" && isNewLead(msg.structured) ? suggestForLead(triage) : undefined;
+      if (lead) await recordLead(db, { id: messageId, conv_id: msg.conv_id, structured: msg.structured }, lead);
+      if (triage.intent === "spam" || triage.nextStep === "ignore") {
+        if (lead) {
+          const first = (msg.from_name ?? msg.contact_name ?? "a customer").split(/\s+/)[0];
+          await notifyOwners(db, `${tenant.name}\n\nCheckatrade lead from ${first} looks like one to turn down: ${lead.reason}.\n\n${checkatradeSteps(await openLead(db, msg.conv_id), "not_for_me", lead.reason)}`);
+        }
+        return finish("ignored", "Spam or irrelevant.", { triage });
+      }
       const mustEscalate = triage.urgency === "emergency" || triage.nextStep === "escalate" || ESCALATE_INTENTS.has(triage.intent);
 
       // 2. Booking (only with the use case on, a calendar connected, and nothing that needs the owner first)
@@ -76,7 +87,9 @@ export async function answerEnquiry(tenantId: string, messageId: string, now = n
       }
 
       // 3. Reply route
-      const route = await chooseRoute(db, tenant, msg.channel, { email: msg.email, phone: msg.phone });
+      // WhatsApp only allows a free-form reply within 24 hours of the customer's last WhatsApp message.
+      const whatsappOpen = !!msg.whatsapp_window_closes_at && new Date(msg.whatsapp_window_closes_at) > now;
+      const route = await chooseRoute(db, tenant, msg.channel, { email: msg.email, phone: msg.phone }, { whatsappOpen });
       events.push({ step: "reply_route", detail: route });
 
       // 4. Draft and independent review

@@ -2,6 +2,7 @@ import { one, withTenant } from "./db.js";
 import { audit } from "./audit.js";
 import { enqueue } from "./jobs/queue.js";
 import { releaseHold } from "./calendar.js";
+import { decideLead } from "./leads.js";
 
 // The one place a draft is approved, edited or rejected. The WhatsApp buttons and the web app both call
 // these, so the two can never disagree about what a decision does.
@@ -14,7 +15,7 @@ export interface Actor {
 }
 
 export type DecisionResult =
-  | { ok: true; customer: string; route: string }
+  | { ok: true; customer: string; route: string; lead?: { job_url: string | null; suggestion_reason: string | null; decision: "interested" | "not_for_me" } }
   | { ok: false; reason: "not_found" | "already_decided"; status?: string };
 
 type Decision = { kind: "approve" } | { kind: "reject" } | { kind: "edit"; body: string };
@@ -38,9 +39,15 @@ async function decide(tenantId: string, actor: Actor, draftId: string, decision:
       await db.query("update drafts set status = 'approved', decided_by = $2, decided_at = now() where id = $1", [draftId, actor.memberId]);
     }
     await db.query("update approval_requests set state = 'done', updated_at = now() where draft_id = $1", [draftId]);
+    // Answering a new Checkatrade lead: approving means "I'm interested", rejecting means "Not for me".
+    const pending = await one(db,
+      `select l.job_url, l.suggestion_reason from checkatrade_leads l join drafts d on d.conversation_id = l.conversation_id
+       where d.id = $1 and d.kind = 'reply' and l.decision = 'pending' order by l.created_at desc limit 1`, [draftId]);
+    const leadDecision = decision.kind === "reject" ? "not_for_me" as const : "interested" as const;
+    if (pending) await decideLead(db, draftId, leadDecision, actor.memberId);
     const action = { approve: "draft.approved", reject: "draft.rejected", edit: "draft.edited_and_approved" }[decision.kind];
     await audit(db, { tenantId, actor: actor.audit, action, entity: "draft", entityId: draftId });
-    return { ok: true, customer: d.customer, route: d.reply_route };
+    return { ok: true, customer: d.customer, route: d.reply_route, lead: pending ? { ...pending, decision: leadDecision } : undefined };
   });
   if (result.ok && decision.kind !== "reject") {
     await enqueue("send_outbox", { tenantId, draftId }, { jobKey: `outbox:${draftId}` });

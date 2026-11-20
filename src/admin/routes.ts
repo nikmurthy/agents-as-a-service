@@ -9,6 +9,7 @@ import { newBusinessSchema, tenantSettingsSchema, USE_CASES } from "../settings-
 import { addWebhook, connectWhatsApp, createTenant, HOOK_PATH, setTenantStatus, type HookKind } from "../onboarding.js";
 import { googleConnectLink } from "../google-link.js";
 import { approveDraft, editAndApproveDraft, rejectDraft, type DecisionResult } from "../decisions.js";
+import { addContactDetails } from "../leads.js";
 import { releaseHold } from "../calendar.js";
 import { exportPerson, erasePerson, suppress } from "../data-rights.js";
 import { normaliseEmail, normalisePhone } from "../channels/parse.js";
@@ -351,6 +352,11 @@ admin.get("/businesses/:id/conversations/:convId", async (c) => {
       drafts: await many(db,
         `select id, kind, reply_route, body, original_body, (body <> original_body) as edited, review, needs_attention, attention_reason, status, created_at, decided_at
          from drafts where conversation_id = $1 order by created_at`, [convId]),
+      lead: (await one(db, "select job_ref, job_url, suggestion, suggestion_reason, decision, decided_at, details_added_at from checkatrade_leads where conversation_id = $1 order by created_at desc limit 1", [convId])) ?? null,
+      contact: await one(db,
+        `select (select value from contact_identities i where i.contact_id = v.contact_id and kind = 'email' limit 1) as email,
+                (select value from contact_identities i where i.contact_id = v.contact_id and kind = 'phone' limit 1) as phone
+         from conversations v where v.id = $1`, [convId]),
     };
   });
   if (!out) throw notFound();
@@ -370,6 +376,20 @@ admin.post("/businesses/:id/conversations/:convId/quote", async (c) => {
   });
   if (!found) throw notFound();
   return c.json({ ok: true });
+});
+
+// The customer's phone or email, once "I'm interested" shows them in Checkatrade. Replies can then go direct.
+admin.post("/businesses/:id/conversations/:convId/contact-details", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"));
+  const convId = uuid(c.req.param("convId"));
+  const body = await parse(c, z.object({
+    email: z.string().trim().toLowerCase().email("That email address doesn't look right").max(200).optional().or(z.literal("")),
+    phone: z.string().trim().regex(/^[+\d][\d\s-]{8,18}$/, "That phone number doesn't look right").optional().or(z.literal("")),
+  }));
+  const r = await addContactDetails(tenantId, convId, { email: body.email || undefined, phone: body.phone || undefined }, actor.audit);
+  if (r.ok) return c.json({ ok: true, added: r.added });
+  if (r.reason === "not_found") throw notFound();
+  return c.json({ ok: false, error: r.reason === "nothing_found" ? "Add a phone number or an email address." : "That phone number or email already belongs to a different customer." }, 400);
 });
 
 function decisionResponse(c: Context, r: DecisionResult) {

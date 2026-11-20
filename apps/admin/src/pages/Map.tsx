@@ -96,7 +96,9 @@ const COLUMNS: { title: string; sub: string; flow?: boolean; layers: Layer[] }[]
         { name: "Lead-site alerts", sub: "Checkatrade, by email or link", kind: "ready", tag: "Added",
           more: ["Checkatrade's lead emails in a connected Gmail are read as leads: the job, postcode, start date and the customer's details.",
             "Their \"new message\" emails join the same job using the job reference. Reviews, invoices and account emails are ignored.",
-            "If the lead has the customer's email, the approved reply goes straight to them as a fresh email. If not, the owner gets the wording to paste into Checkatrade.",
+            "Each new lead comes with a suggestion: I'm interested, or Not for me with a reason (spam, outside the area). The owner's Approve or Reject is that decision.",
+            "Checkatrade doesn't allow bots, so the owner taps it in Checkatrade by hand: we send the job link, the steps and the reply to paste.",
+            "Once Checkatrade shows the customer's phone or email, the owner sends it to us on WhatsApp or adds it in the Inbox. Replies then go to the customer directly.",
             "Big Checkatrade accounts can use a direct lead link instead of email."],
           live: (d) => {
             const k = n(d.counts.messagesIn, "checkatrade"), link = conn("checkatrade_webhook", "Checkatrade link")(d);

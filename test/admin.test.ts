@@ -196,6 +196,33 @@ test("editing on the web sends the edited wording", async () => {
   assert.ok(list.json.conversations.some((c: any) => c.id === conversationId));
 });
 
+test("Checkatrade lead: the owner adds the customer's details on the web; another business can't", async () => {
+  const { conversationId } = await makeDraft(A);
+  await withTenant(A, async (db) => {
+    const m = await one<{ id: string }>(db, "select id from messages where conversation_id = $1", [conversationId]);
+    await db.query("insert into checkatrade_leads (tenant_id, conversation_id, message_id, job_url, suggestion, decision) values (app_current_tenant(), $1, $2, 'https://membersapp.checkatrade.com/jobs/x', 'interested', 'interested')", [conversationId, m!.id]);
+  });
+  const view = await api("staffA", "GET", `/businesses/${A}/conversations/${conversationId}`);
+  assert.equal(view.json.lead.decision, "interested");
+  assert.equal(view.json.lead.job_url, "https://membersapp.checkatrade.com/jobs/x");
+
+  assert.equal((await api("ownerA", "POST", `/businesses/${A}/conversations/${conversationId}/contact-details`, {})).status, 400, "needs a phone or email");
+  assert.equal((await api("ownerA", "POST", `/businesses/${A}/conversations/${conversationId}/contact-details`, { email: "not-an-email" })).status, 400);
+  assert.equal((await api("ownerB", "POST", `/businesses/${A}/conversations/${conversationId}/contact-details`, { phone: "07700 900971" })).status, 404);
+  assert.equal((await api("ownerB", "POST", `/businesses/${B}/conversations/${conversationId}/contact-details`, { phone: "07700 900971" })).status, 404);
+
+  const ok = await api("staffA", "POST", `/businesses/${A}/conversations/${conversationId}/contact-details`, { phone: "07700 900971", email: "Jo.Lead@Example.com" });
+  assert.equal(ok.status, 200);
+  const after = await api("ownerA", "GET", `/businesses/${A}/conversations/${conversationId}`);
+  assert.deepEqual(after.json.contact, { email: "jo.lead@example.com", phone: "+447700900971" });
+  assert.ok(after.json.lead.details_added_at);
+  assert.equal((await withTenant(B, (db) => one<{ n: number }>(db, "select count(*)::int as n from checkatrade_leads")))!.n, 0, "business B sees none of A's leads");
+
+  const { conversationId: other } = await makeDraft(A);
+  const clash = await api("ownerA", "POST", `/businesses/${A}/conversations/${other}/contact-details`, { phone: "07700 900971" });
+  assert.equal(clash.status, 400, "a number that belongs to another customer isn't moved");
+});
+
 test("a platform admin sees every business, but only after two-factor", async () => {
   const noMfa = await api("admin", "GET", "/me", undefined, "aal1");
   assert.equal(noMfa.json.isAdmin, false);

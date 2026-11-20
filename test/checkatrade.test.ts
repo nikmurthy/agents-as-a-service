@@ -1,7 +1,8 @@
 // Reading Checkatrade's emails: different layouts, follow-up messages, and the emails that aren't enquiries.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCheckatradeEmail, parseGmail } from "../src/channels/parse.js";
+import { checkatradeJobLink, parseCheckatradeEmail, parseCheckatradeWebhook, parseGmail } from "../src/channels/parse.js";
+import { findContactDetails, suggestForLead } from "../src/leads.js";
 import { gmailMsg } from "./fakes.js";
 
 test("table layout with bold labels", () => {
@@ -59,4 +60,28 @@ test("Gmail: Checkatrade lead keeps no email thread; other senders do", () => {
   const normal = parseGmail(gmailMsg({ id: "g3", from: "Ann <ann@example.com>", to: "o@b.example", subject: "Quote", text: "Hello" }), { checkatradeSenders: [] })!;
   assert.equal(normal.email?.threadId, "t-g3");
   assert.equal(parseGmail(gmailMsg({ id: "g4", from: "noreply@checkatrade.com", to: "o@b.example", subject: "Your invoice", text: "Amount due" }), { checkatradeSenders: [] }), null);
+});
+
+test("job link: the members' app link, not unsubscribe or help links", () => {
+  assert.equal(checkatradeJobLink(`<a href="https://www.checkatrade.com/unsubscribe">x</a><a href="https://membersapp.checkatrade.com/jobs/j-1?utm=a&amp;b=2">View</a>`),
+    "https://membersapp.checkatrade.com/jobs/j-1?utm=a&b=2");
+  assert.equal(checkatradeJobLink("Visit https://www.checkatrade.com/support/trade for help."), undefined);
+  const w = parseCheckatradeWebhook({ jobId: "J9", title: "Windows", tradeWebUrl: "https://membersapp.checkatrade.com/jobs/J9" });
+  assert.equal(w.structured!["Job link"], "https://membersapp.checkatrade.com/jobs/J9");
+  assert.equal(w.structured!["Job reference"], "J9");
+});
+
+test("customer details pasted by the owner, in the ways people type them", () => {
+  assert.deepEqual(findContactDetails("07700 900811"), { email: undefined, phone: "+447700900811" });
+  assert.deepEqual(findContactDetails("her email is Chloe.B@Example.com"), { email: "chloe.b@example.com", phone: undefined });
+  assert.deepEqual(findContactDetails("+44 7700 900812, chloe@ex.co.uk"), { email: "chloe@ex.co.uk", phone: "+447700900812" });
+  assert.deepEqual(findContactDetails("thanks, all done"), { email: undefined, phone: undefined });
+  assert.deepEqual(findContactDetails("job 12345"), { email: undefined, phone: undefined }, "short numbers aren't phone numbers");
+});
+
+test("suggestion: spam and out-of-area leads are Not for me, the rest Interested", () => {
+  const t = { intent: "quote_request", urgency: "normal", needsHuman: false, nextStep: "book_visit", missingInfo: [], reason: "" } as any;
+  assert.deepEqual(suggestForLead(t), { suggestion: "interested" });
+  assert.deepEqual(suggestForLead({ ...t, inServiceArea: false }), { suggestion: "not_for_me", reason: "Outside the area we cover" });
+  assert.deepEqual(suggestForLead({ ...t, intent: "spam", nextStep: "ignore" }), { suggestion: "not_for_me", reason: "This job is spam" });
 });

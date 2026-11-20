@@ -4,6 +4,7 @@ import { buildEmail } from "./integrations/google.js";
 import { getConnection, googleToken, platformWaSender, tenantWaSender } from "./connections.js";
 import { approvers } from "./tenants.js";
 import { audit } from "./audit.js";
+import { checkatradeSteps, openLead } from "./leads.js";
 
 /**
  * Sends an approved draft by its route. WhatsApp and email go automatically. Checkatrade, text and phone
@@ -68,9 +69,18 @@ export async function sendOutbox(tenantId: string, draftId: string, attempt = 1,
         return done("sent", r.id);
       }
       // Manual routes: hand the final wording to the owner.
-      const which = [d.customer && first(d.customer), d.checkatrade_job].filter(Boolean).join(", ");
-      const how = d.reply_route === "checkatrade_message" ? `Paste this into Checkatrade${which ? ` (${which})` : ""}`
-        : d.reply_route === "sms" ? `Text this to ${d.phone ?? "the customer"}`
+      if (d.reply_route === "checkatrade_message") {
+        const which = [d.customer && first(d.customer), d.checkatrade_job].filter(Boolean).join(", ");
+        const lead = await openLead(db, d.conversation_id);
+        const steps = lead?.decision === "interested" && !lead.details_added_at;
+        await notifyOwners(db, steps
+          ? `Checkatrade${which ? `: ${which}` : ""}\n${checkatradeSteps(lead, "interested")}\n4. Send me ${first(d.customer)}'s phone number or email (Checkatrade shows them once you're interested) and I'll take it from there.\n\n${d.body}`
+          : `Paste this into Checkatrade${which ? ` (${which})` : ""}:\n\n${d.body}`);
+        // Wait for the customer's details from whoever was asked to approve.
+        if (steps) await db.query("update approval_requests set state = 'awaiting_details', updated_at = now() where draft_id = $1", [draftId]);
+        return done("manual");
+      }
+      const how = d.reply_route === "sms" ? `Text this to ${d.phone ?? "the customer"}`
         : `Call ${first(d.customer)}${d.phone ? ` on ${d.phone}` : ""}. Suggested wording`;
       await notifyOwners(db, `${how}:\n\n${d.body}`);
       return done("manual");
@@ -82,7 +92,7 @@ export async function sendOutbox(tenantId: string, draftId: string, attempt = 1,
   });
 }
 
-async function notifyOwners(db: any, text: string) {
+export async function notifyOwners(db: any, text: string) {
   for (const p of await approvers(db)) await clients.whatsapp.sendText(platformWaSender(), p.whatsapp_phone, text);
 }
 const first = (s: string) => (s || "the customer").split(/\s+/)[0];
