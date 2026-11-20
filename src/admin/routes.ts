@@ -231,9 +231,16 @@ admin.get("/businesses/:id/flows", async (c) => {
   return c.json({ ...out, canManage: role !== "staff" });
 });
 
+// Industry booking systems a business might already take bookings in. We send their booking page link.
+const BOOKING_SYSTEMS = ["halaxy", "cliniko", "jane", "fresha", "timely", "setmore", "calendly", "acuity", "simplybook", "other"] as const;
+
 const flowConfig = {
   answer_enquiries: z.object({ learnAfter: z.number().int().min(0).max(20) }).strict(),
-  book_appointments: z.object({}).strict(),
+  book_appointments: z.object({
+    mode: z.enum(["owner", "link"]),
+    system: z.enum(BOOKING_SYSTEMS),
+    link: z.string().trim().max(500).url("The booking link should be a web address starting with https://").refine((u) => u.startsWith("https://"), "The booking link should start with https://"),
+  }).partial().strict(),
   chase_quotes: z.object({ afterDays: z.number().int().min(1).max(30) }).strict(),
   ask_feedback: z.object({
     afterDays: z.number().int().min(0).max(13),
@@ -251,6 +258,7 @@ admin.put("/businesses/:id/flows/:key", async (c) => {
     const enabled = body.enabled ?? old?.enabled ?? false;
     const next = config ? { ...(old?.config ?? {}), ...config } : old?.config ?? {};
     if (next.reviewLink === "") delete next.reviewLink; // cleared
+    if (key === "book_appointments" && next.mode === "link" && !next.link) throw new HTTPException(400, { message: "Add your booking link first" });
     await db.query(
       `insert into tenant_use_cases (tenant_id, use_case, enabled, config) values (app_current_tenant(), $1, $2, $3)
        on conflict (tenant_id, use_case) do update set enabled = excluded.enabled, config = excluded.config`, [key, enabled, next]);

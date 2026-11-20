@@ -343,6 +343,13 @@ test("flows: owners set each step's choices and automation; staff can look; othe
   await api("ownerA", "PUT", `/businesses/${A}/flows/ask_feedback`, { config: { reviewLink: "" } });
   assert.deepEqual((await api("ownerA", "GET", `/businesses/${A}/flows`)).json.useCases.ask_feedback.config, { afterDays: 2 });
 
+  // Booking through their own system (e.g. Halaxy): needs a secure link.
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/flows/book_appointments`, { enabled: false, config: { mode: "link" } })).status, 400, "no link yet");
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/flows/book_appointments`, { enabled: false, config: { mode: "link", system: "halaxy", link: "http://insecure.example/book" } })).status, 400);
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/flows/book_appointments`, { enabled: false, config: { mode: "link", system: "halaxy", link: "https://www.halaxy.com/book/x/1" } })).status, 200);
+  assert.deepEqual((await api("ownerA", "GET", `/businesses/${A}/flows`)).json.useCases.book_appointments, { enabled: false, config: { mode: "link", system: "halaxy", link: "https://www.halaxy.com/book/x/1" } });
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/flows/book_appointments`, { enabled: true })).status, 200);
+
   assert.equal((await api("ownerA", "PUT", `/businesses/${A}/automations/answer_question`, { on: true })).status, 200);
   assert.equal((await api("ownerA", "GET", `/businesses/${A}/flows`)).json.kinds[0].state, "on");
   assert.equal((await api("ownerA", "PUT", `/businesses/${A}/automations/anything_goes`, { on: true })).status, 400);
