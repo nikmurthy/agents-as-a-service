@@ -10,6 +10,10 @@ import { addWebhook, connectWhatsApp, createTenant, HOOK_PATH, setTenantStatus, 
 import { googleConnectLink } from "../google-link.js";
 import { approveDraft, editAndApproveDraft, rejectDraft, type DecisionResult } from "../decisions.js";
 import { addContactDetails } from "../leads.js";
+import { answerOffer, automationState, CATEGORIES, DEFAULT_LEARN_AFTER, learnAfter, unchangedStreak } from "../automation.js";
+import { CHASE_AFTER_DAYS } from "../workflows/chase-quotes.js";
+import { FEEDBACK_AFTER_DAYS, feedbackWording } from "../workflows/ask-feedback.js";
+import { loadTenant } from "../tenants.js";
 import { releaseHold } from "../calendar.js";
 import { exportPerson, erasePerson, suppress } from "../data-rights.js";
 import { normaliseEmail, normalisePhone } from "../channels/parse.js";
@@ -198,6 +202,71 @@ admin.put("/businesses/:id/use-cases/:key", async (c) => {
   return c.json({ key, enabled });
 });
 
+// ---------------------------------------------------------------- flows: each step's choices, and automation
+admin.get("/businesses/:id/flows", async (c) => {
+  const { tenantId, role } = tenantAccess(c, c.req.param("id"));
+  const out = await withTenant(tenantId, async (db) => {
+    const rows = await many<{ use_case: string; enabled: boolean; config: any }>(db, "select use_case, enabled, config from tenant_use_cases");
+    const tenant = await loadTenant(db, tenantId);
+    const n = await learnAfter(db);
+    const kinds = [];
+    for (const [key, info] of Object.entries(CATEGORIES)) {
+      const a = await automationState(db, key);
+      kinds.push({ key, ...info, streak: await unchangedStreak(db, key, Math.max(n, 1)), state: a?.state ?? null,
+        sentAutomatically: (await one<{ n: number }>(db, "select count(*)::int as n from drafts where category = $1 and auto_sent", [key]))!.n });
+    }
+    const fb = rows.find((r) => r.use_case === "ask_feedback")?.config ?? {};
+    return {
+      useCases: Object.fromEntries(USE_CASES.map((k) => {
+        const r = rows.find((x) => x.use_case === k);
+        return [k, { enabled: !!r?.enabled, config: r?.config ?? {} }];
+      })),
+      learnAfter: n, spotCheckEvery: tenant.settings.spotCheckEvery ?? 3, kinds,
+      defaults: { learnAfter: DEFAULT_LEARN_AFTER, chaseAfterDays: CHASE_AFTER_DAYS, feedbackAfterDays: FEEDBACK_AFTER_DAYS },
+      feedbackPreview: feedbackWording(tenant, "Sam Taylor", fb.reviewLink),
+      connected: (await many<{ kind: string }>(db, "select distinct kind from channel_connections where status = 'active'")).map((r) => r.kind),
+      replyVia: tenant.settings.replyVia ?? {},
+    };
+  });
+  return c.json({ ...out, canManage: role !== "staff" });
+});
+
+const flowConfig = {
+  answer_enquiries: z.object({ learnAfter: z.number().int().min(0).max(20) }).strict(),
+  book_appointments: z.object({}).strict(),
+  chase_quotes: z.object({ afterDays: z.number().int().min(1).max(30) }).strict(),
+  ask_feedback: z.object({
+    afterDays: z.number().int().min(0).max(13),
+    reviewLink: z.string().trim().max(500).url("The review link should start with https://").refine((u) => u.startsWith("https://"), "The review link should start with https://").optional().or(z.literal("")),
+  }).partial().strict(),
+} as const;
+
+admin.put("/businesses/:id/flows/:key", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
+  const key = z.enum(USE_CASES).parse(c.req.param("key"));
+  const body = await parse(c, z.object({ enabled: z.boolean().optional(), config: z.record(z.string(), z.unknown()).optional() }));
+  const config = body.config ? flowConfig[key].parse(body.config) as Record<string, unknown> : undefined;
+  await withTenant(tenantId, async (db) => {
+    const old = await one<{ enabled: boolean; config: any }>(db, "select enabled, config from tenant_use_cases where use_case = $1", [key]);
+    const enabled = body.enabled ?? old?.enabled ?? false;
+    const next = config ? { ...(old?.config ?? {}), ...config } : old?.config ?? {};
+    if (next.reviewLink === "") delete next.reviewLink; // cleared
+    await db.query(
+      `insert into tenant_use_cases (tenant_id, use_case, enabled, config) values (app_current_tenant(), $1, $2, $3)
+       on conflict (tenant_id, use_case) do update set enabled = excluded.enabled, config = excluded.config`, [key, enabled, next]);
+    await audit(db, { tenantId, actor: actor.audit, action: "use_case.changed", entity: "use_case", entityId: key, detail: { enabled, config: next } });
+  });
+  return c.json({ ok: true });
+});
+
+admin.put("/businesses/:id/automations/:category", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
+  const category = z.enum(Object.keys(CATEGORIES) as [string, ...string[]]).parse(c.req.param("category"));
+  const { on } = await parse(c, z.object({ on: z.boolean() }));
+  const message = await answerOffer(tenantId, category, on, actor.memberId, actor.audit);
+  return c.json({ ok: true, message });
+});
+
 // ---------------------------------------------------------------- connections (secrets are write-only)
 admin.get("/businesses/:id/connections", async (c) => {
   const { tenantId, role } = tenantAccess(c, c.req.param("id"));
@@ -344,13 +413,16 @@ admin.get("/businesses/:id/conversations/:convId", async (c) => {
   const { tenantId } = tenantAccess(c, c.req.param("id"));
   const convId = uuid(c.req.param("convId"));
   const out = await withTenant(tenantId, async (db) => {
-    const conv = await one(db, "select v.id, v.status, v.quoted_at, v.chased_at, ct.name from conversations v join contacts ct on ct.id = v.contact_id where v.id = $1", [convId]);
+    const conv = await one(db,
+      `select v.id, v.status, v.quoted_at, v.chased_at, v.completed_at, v.feedback_asked_at, ct.name,
+         (select max(h.end_at) from holds h where h.conversation_id = v.id and h.status = 'confirmed') as booked_until
+       from conversations v join contacts ct on ct.id = v.contact_id where v.id = $1`, [convId]);
     if (!conv) return undefined;
     return {
       conversation: conv,
       messages: await many(db, "select id, direction, channel, subject, body, from_name, data_tags, received_at from messages where conversation_id = $1 order by received_at", [convId]),
       drafts: await many(db,
-        `select id, kind, reply_route, body, original_body, (body <> original_body) as edited, review, needs_attention, attention_reason, status, created_at, decided_at
+        `select id, kind, category, auto_sent, reply_route, body, original_body, (body <> original_body) as edited, review, needs_attention, attention_reason, status, created_at, decided_at
          from drafts where conversation_id = $1 order by created_at`, [convId]),
       lead: (await one(db, "select job_ref, job_url, suggestion, suggestion_reason, decision, decided_at, details_added_at from checkatrade_leads where conversation_id = $1 order by created_at desc limit 1", [convId])) ?? null,
       contact: await one(db,
@@ -378,6 +450,21 @@ admin.post("/businesses/:id/conversations/:convId/quote", async (c) => {
   return c.json({ ok: true });
 });
 
+// The owner says the job is done (for work not booked through the calendar): feedback can be asked for.
+admin.post("/businesses/:id/conversations/:convId/done", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"));
+  const convId = uuid(c.req.param("convId"));
+  const { done } = await parse(c, z.object({ done: z.boolean() }));
+  const found = await withTenant(tenantId, async (db) => {
+    const r = await db.query(done ? "update conversations set completed_at = now() where id = $1" : "update conversations set completed_at = null where id = $1", [convId]);
+    if (!r.rowCount) return false;
+    await audit(db, { tenantId, actor: actor.audit, action: done ? "job.marked_done" : "job.unmarked_done", entity: "conversation", entityId: convId });
+    return true;
+  });
+  if (!found) throw notFound();
+  return c.json({ ok: true });
+});
+
 // The customer's phone or email, once "I'm interested" shows them in Checkatrade. Replies can then go direct.
 admin.post("/businesses/:id/conversations/:convId/contact-details", async (c) => {
   const { tenantId, actor } = tenantAccess(c, c.req.param("id"));
@@ -393,7 +480,7 @@ admin.post("/businesses/:id/conversations/:convId/contact-details", async (c) =>
 });
 
 function decisionResponse(c: Context, r: DecisionResult) {
-  if (r.ok) return c.json({ ok: true });
+  if (r.ok) return c.json({ ok: true, automation: r.automation ?? null });
   if (r.reason === "not_found") throw notFound();
   return c.json({ ok: false, error: `This reply is already ${(r.status ?? "dealt with").replace("_", " ")}.`, status: r.status }, 409);
 }

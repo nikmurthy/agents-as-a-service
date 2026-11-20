@@ -9,9 +9,9 @@ import { modelView } from "../privacy.js";
 import { calendarConnection, confirmHold, createHold, isFree, openHolds, releaseHold } from "../calendar.js";
 import { getConnection } from "../connections.js";
 import { audit } from "../audit.js";
-import { enqueue } from "../jobs/queue.js";
 import { checkatradeSteps, isNewLead, openLead, recordLead, suggestForLead } from "../leads.js";
 import { notifyOwners } from "../outbox.js";
+import { approveOrAsk, categorise, queueNext } from "../automation.js";
 
 const ESCALATE_INTENTS = new Set(["emergency", "complaint", "clinical_question"]);
 
@@ -80,8 +80,9 @@ export async function answerEnquiry(tenantId: string, messageId: string, now = n
       // 2. Booking (only with the use case on, a calendar connected, and nothing that needs the owner first)
       let booking: (BookingResult & { holdIds?: string[] }) | undefined;
       const wantsBooking = ["book_visit", "book_consultation", "confirm_booking", "reschedule"].includes(triage.nextStep);
-      if (wantsBooking && !mustEscalate && triage.inServiceArea !== false
-          && (await useCaseEnabled(db, "book_appointments")) && (await calendarConnection(db))) {
+      // Flows → Booking: "offer times" needs the use case on and a calendar; otherwise the owner arranges the time.
+      const offersTimes = (await useCaseEnabled(db, "book_appointments")) && !!(await calendarConnection(db));
+      if (wantsBooking && !mustEscalate && triage.inServiceArea !== false && offersTimes) {
         booking = await runAgent<BookingResult>(agents.booking, { message: view, triage, offeredTimes: offered }, ctx, events);
         booking = await applyBooking(db, tenant, booking, msg, offered, now, events);
       }
@@ -97,6 +98,7 @@ export async function answerEnquiry(tenantId: string, messageId: string, now = n
         message: view,
         channel: { kind: msg.channel, replyVia: route, replyStyle: ["whatsapp", "checkatrade_message", "sms"].includes(route) ? "short" : "email" },
         triage, booking: booking ? { action: booking.action, slots: booking.slots } : undefined, proposedSlots: booking?.slots ?? [],
+        bookingPolicy: wantsBooking && !booking ? "owner_arranges" : undefined,
       }, ctx, events);
       const review = await runAgent<ReviewResult>(agents.reviewer, { message: view, triage, proposedSlots: booking?.slots ?? [], draft }, ctx, events);
       const minScore = Math.min(...Object.values(review.scores));
@@ -106,12 +108,14 @@ export async function answerEnquiry(tenantId: string, messageId: string, now = n
         : !passed ? `Check carefully: ${review.issues.join(" ") || "reviewer score low"}`
         : draft.needsHumanBeforeSending || triage.needsHuman ? "Agent asked you to check this one." : null;
 
+      // A new Checkatrade lead needs the owner's decision in Checkatrade, so it is never automated.
+      const category = lead ? undefined : categorise(triage, booking, mustEscalate);
       const d = await one<{ id: string }>(db,
-        `insert into drafts (tenant_id, run_id, conversation_id, reply_route, body, original_body, review, needs_attention, attention_reason)
-         values (app_current_tenant(), $1, $2, $3, $4, $4, $5, $6, $7) returning id`,
-        [run!.id, msg.conv_id, route, draft.replyText, { ...review, internalNote: draft.internalNote }, !!attention, attention]);
+        `insert into drafts (tenant_id, run_id, conversation_id, reply_route, body, original_body, review, needs_attention, attention_reason, category)
+         values (app_current_tenant(), $1, $2, $3, $4, $4, $5, $6, $7, $8) returning id`,
+        [run!.id, msg.conv_id, route, draft.replyText, { ...review, internalNote: draft.internalNote }, !!attention, attention, category ?? null]);
       await finish(mustEscalate ? "escalated" : attention ? "needs_attention" : "ready_for_approval", attention ?? "Draft passed review.", { triage, booking });
-      await enqueue("send_approval", { tenantId, draftId: d!.id }, { jobKey: `approval:${d!.id}`, maxAttempts: 8 });
+      await queueNext(await approveOrAsk(db, tenant, d!.id)); // statements here commit as they run
     } catch (e: any) {
       await log();
       await db.query("update runs set status = 'failed', error = $2, finished_at = now() where id = $1", [run!.id, String(e?.message ?? e).slice(0, 2000)]);

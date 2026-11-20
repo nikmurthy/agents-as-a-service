@@ -13,7 +13,7 @@ Multi-tenant platform: each business is a tenant. Keep to these rules in every c
 ## Agents and use cases
 - Agents are versioned JSON in `config/agents/`. Change = bump `version`, then `npm run agents:sync`. Never edit a published version.
 - Agents judge; code decides. Escalation, slot validation, reply routes and sending rules live in TypeScript, not prompts.
-- Nothing reaches a customer without an approved draft. Keep it that way unless the business explicitly opts into auto-send for a use case (not built yet).
+- Nothing reaches a customer without an approved draft, except kinds of reply the owner has said yes to automating (`src/automation.ts`). Automation is only ever offered, never switched on by code; it keeps spot checks, tells the owner each time, and never covers drafts without a `category` (escalations, flagged, Checkatrade leads, moving bookings) or manual routes. New draft-creating code must set `category` deliberately and go through `approveOrAsk()` + `queueNext()` after commit.
 - A new use case = a workflow in `src/workflows/`, a task in `src/jobs/tasks.ts`, a value in the `tenant_use_cases` check constraint, and tests.
 - A new channel = a parser in `src/channels/parse.ts`, a route into `ingest()`, and tests. Nothing downstream changes.
 

@@ -7,7 +7,7 @@ import { Businesses } from "./pages/Businesses";
 import { Overview } from "./pages/Overview";
 import { Inbox, Conversation } from "./pages/Inbox";
 import { Settings } from "./pages/Settings";
-import { UseCases } from "./pages/UseCases";
+import { Flows } from "./pages/Flows";
 import { Connections } from "./pages/Connections";
 import { People } from "./pages/People";
 import { Bookings } from "./pages/Bookings";
@@ -80,7 +80,8 @@ function Signed() {
           <Route path="inbox" element={<Inbox />} />
           <Route path="inbox/:convId" element={<Conversation />} />
           <Route path="settings" element={<Settings />} />
-          <Route path="use-cases" element={<UseCases />} />
+          <Route path="flows" element={<Flows />} />
+          <Route path="use-cases" element={<Navigate to="../flows" replace />} />
           <Route path="connections" element={<Connections />} />
           <Route path="people" element={<People />} />
           <Route path="bookings" element={<Bookings />} />
@@ -124,7 +125,7 @@ function BusinessFrame({ me }: { me: Me }) {
   const canManage = me.isAdmin || mine?.role === "owner";
   const tabs: [string, string][] = [
     ["", "Overview"], ["inbox", "Inbox"], ["bookings", "Bookings"], ["activity", "Activity"], ["settings", "Settings"],
-    ["use-cases", "Use cases"], ["connections", "Connections"], ["people", "People"], ...(canManage ? [["data", "Data requests"] as [string, string]] : []),
+    ["flows", "Flows"], ["connections", "Connections"], ["people", "People"], ...(canManage ? [["data", "Data requests"] as [string, string]] : []),
   ];
   if (error) return <ErrorNote message={error} />;
   if (!data) return <Loading />;

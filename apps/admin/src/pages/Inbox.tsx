@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { get, post } from "../api";
+import { get, post, put } from "../api";
 import { useBiz } from "../ctx";
 import { Card, Empty, ErrorNote, Loading, Page, Status, useAction, useLoad, when } from "../ui";
 
@@ -52,6 +52,7 @@ export function Conversation() {
       </div>
       {data.lead && <CheckatradeLead lead={data.lead} contact={data.contact} convId={data.conversation.id} bizId={id} onChange={reload} />}
       <Quote conv={data.conversation} bizId={id} onChange={reload} />
+      <JobDone conv={data.conversation} bizId={id} onChange={reload} />
       {data.drafts.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} leadPending={data.lead?.decision === "pending" && d.kind === "reply"} />)}
     </Page>
   );
@@ -108,16 +109,48 @@ function Quote({ conv, bizId, onChange }: { conv: any; bizId: string; onChange: 
   );
 }
 
+/** For work not booked through the calendar: marking it done lets the assistant ask for feedback (when that's on in Flows). */
+function JobDone({ conv, bizId, onChange }: { conv: any; bizId: string; onChange: () => void }) {
+  const { busy, error, run } = useAction();
+  const set = (done: boolean) => run(async () => { await post(`/businesses/${bizId}/conversations/${conv.id}/done`, { done }); onChange(); });
+  const booked = conv.booked_until && !conv.completed_at;
+  return (
+    <Card title="Job">
+      {conv.feedback_asked_at ? <p className="muted">Feedback was asked for {when(conv.feedback_asked_at)}.</p>
+        : conv.completed_at ? <p className="muted">Marked as done {when(conv.completed_at)}. If "Feedback" is on in <Link to={`/b/${bizId}/flows?step=feedback`}>Flows</Link>, the customer will be asked how it went.</p>
+        : booked ? <p className="muted">Booked until {when(conv.booked_until)}. Once it's over, the customer can be asked how it went (Flows → Feedback).</p>
+        : <p className="muted">Finished the work? Mark it done and the assistant can ask the customer how it went.</p>}
+      <ErrorNote message={error} />
+      {!conv.feedback_asked_at && (
+        <div className="buttons">
+          {conv.completed_at
+            ? <button disabled={busy} onClick={() => set(false)}>Not done after all</button>
+            : <button disabled={busy} onClick={() => set(true)}>Job done</button>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function Draft({ draft, bizId, onChange, leadPending }: { draft: any; bizId: string; onChange: () => void; leadPending?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(draft.body);
   const { busy, error, run } = useAction();
   const pending = draft.status === "pending_approval";
-  const act = (verb: string, body?: unknown) => run(async () => { await post(`/businesses/${bizId}/drafts/${draft.id}/${verb}`, body); setEditing(false); onChange(); });
+  const { canManage } = useBiz();
+  const [automation, setAutomation] = useState<{ text: string; offer?: string } | null>(null);
+  const act = (verb: string, body?: unknown) => run(async () => {
+    const r = await post(`/businesses/${bizId}/drafts/${draft.id}/${verb}`, body);
+    setAutomation(r?.automation ?? null); setEditing(false); onChange();
+  });
+  const answer = (on: boolean) => run(async () => {
+    const r = await put(`/businesses/${bizId}/automations/${automation!.offer}`, { on });
+    setAutomation({ text: r.message }); onChange();
+  });
   return (
-    <Card title={`${draft.kind === "chase" ? "Quote follow-up" : "Reply"} by ${ROUTE[draft.reply_route] ?? draft.reply_route}`}>
-      <div className="row-meta"><Status value={draft.status} />{draft.edited && <span className="pill muted">edited</span>}<span className="muted">{when(draft.created_at)}</span></div>
-      {draft.needs_attention && <p className="note error">{draft.attention_reason}</p>}
+    <Card title={`${draft.kind === "chase" ? "Quote follow-up" : draft.kind === "feedback" ? "Feedback request" : "Reply"} by ${ROUTE[draft.reply_route] ?? draft.reply_route}`}>
+      <div className="row-meta"><Status value={draft.status} />{draft.edited && <span className="pill muted">edited</span>}{draft.auto_sent && <span className="pill good">sent automatically</span>}<span className="muted">{when(draft.created_at)}</span></div>
+      {draft.needs_attention ? <p className="note error">{draft.attention_reason}</p> : draft.attention_reason && pending && <p className="note">🔎 {draft.attention_reason}</p>}
       {editing ? <textarea rows={7} value={text} onChange={(e) => setText(e.target.value)} aria-label="Reply wording" /> : <p className="draft-body">{draft.body}</p>}
       <ErrorNote message={error} />
       {pending && (
@@ -133,6 +166,15 @@ function Draft({ draft, bizId, onChange, leadPending }: { draft: any; bizId: str
         </div>
       )}
       {draft.status === "manual" && <p className="muted">This one needs you to send it yourself.</p>}
+      {automation && (<>
+        <p className={`note ${automation.offer ? "" : "good"}`}>{automation.text}</p>
+        {automation.offer && (canManage ? (
+          <div className="buttons">
+            <button className="primary" disabled={busy} onClick={() => answer(true)}>Yes, automate</button>
+            <button disabled={busy} onClick={() => answer(false)}>Keep asking me</button>
+          </div>
+        ) : <p className="muted small">The business owner can switch this on in Flows.</p>)}
+      </>)}
     </Card>
   );
 }
