@@ -62,10 +62,16 @@ export function useAction() {
   return { busy, error, field, done, run };
 }
 
+// Statuses in the owner's words rather than the database's.
+const WORDS: Record<string, string> = {
+  pending_approval: "waiting for you", held: "pencilled in", confirmed: "booked", manual: "for you to send", approved: "approved, sending",
+  rejected: "not sent", released: "released", expired: "not picked", failed: "didn't send", onboarding: "being set up",
+};
+
 export function Status({ value }: { value: string }) {
   const tone = { active: "good", sent: "good", confirmed: "good", done: "good", paused: "warn", pending_approval: "warn", held: "warn", onboarding: "warn", running: "warn",
     failed: "bad", error: "bad", closed: "muted", rejected: "muted", cancelled: "muted", released: "muted", expired: "muted", disconnected: "muted" }[value] ?? "muted";
-  return <span className={`pill ${tone}`}>{value.replace(/_/g, " ")}</span>;
+  return <span className={`pill ${tone}`}>{WORDS[value] ?? value.replace(/_/g, " ")}</span>;
 }
 
 export const when = (iso?: string | null) =>

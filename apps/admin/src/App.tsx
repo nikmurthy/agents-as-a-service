@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Navigate, NavLink, Outlet, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "./auth";
 import { get } from "./api";
-import { ErrorNote, Loading, useAction, useLoad } from "./ui";
+import { ErrorNote, Loading, Status, useAction, useLoad } from "./ui";
 import { Businesses } from "./pages/Businesses";
 import { Overview } from "./pages/Overview";
 import { Inbox, Conversation } from "./pages/Inbox";
@@ -124,7 +124,7 @@ function BusinessFrame({ me }: { me: Me }) {
   const mine = me.businesses.find((b) => b.id === id);
   const canManage = me.isAdmin || mine?.role === "owner";
   const tabs: [string, string][] = [
-    ["", "Overview"], ["inbox", "Inbox"], ["bookings", "Bookings"], ["activity", "Activity"], ["settings", "Settings"],
+    ["", "Overview"], ["inbox", "Inbox"], ["bookings", "Bookings"], ["activity", "What happened"], ["settings", "Settings"],
     ["flows", "Flows"], ["connections", "Connections"], ["people", "People"], ...(canManage ? [["data", "Data requests"] as [string, string]] : []),
   ];
   if (error) return <ErrorNote message={error} />;
@@ -133,7 +133,7 @@ function BusinessFrame({ me }: { me: Me }) {
     <>
       <div className="biz-head">
         <h1>{data.business.name}</h1>
-        <span className={`pill ${data.business.status === "active" ? "good" : "warn"}`}>{data.business.status}</span>
+        <Status value={data.business.status} />
       </div>
       <nav className="tabs" aria-label="Business sections">
         {tabs.map(([to, label]) => <NavLink key={to} end={to === ""} to={`/b/${id}${to ? "/" + to : ""}`}>{label}</NavLink>)}

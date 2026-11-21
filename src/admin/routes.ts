@@ -20,6 +20,9 @@ import { normaliseEmail, normalisePhone } from "../channels/parse.js";
 import { platformStatus, servicesReady, testService } from "./platform.js";
 import { loadAgents } from "../agents/registry.js";
 import { costUsd } from "../agents/pricing.js";
+import { feed } from "./feed.js";
+import { weekNumbers } from "../workflows/weekly-summary.js";
+import { tryEnquiry } from "../workflows/try-enquiry.js";
 
 // Admin web app API. Every route checks who is signed in and whether they may use the business in the URL.
 // Business-scoped routes only touch data through withTenant, so row-level security is the backstop.
@@ -92,7 +95,7 @@ admin.post("/businesses", async (c) => {
 admin.get("/businesses/:id", async (c) => {
   const { tenantId } = tenantAccess(c, c.req.param("id"));
   return c.json(await withTenant(tenantId, async (db) => {
-    const t = await one(db, "select id, slug, name, pack, status, created_at from tenants where id = app_current_tenant()");
+    const t = await one(db, "select id, slug, name, pack, status, created_at, coalesce((settings->>'weeklySummary')::boolean, false) as weekly_summary from tenants where id = app_current_tenant()");
     if (!t) throw notFound();
     const numbers = await one(db,
       `select
@@ -107,8 +110,35 @@ admin.get("/businesses/:id", async (c) => {
       brokenConnections: await many(db, "select id, kind, label, last_error from channel_connections where status = 'error'"),
       failedRuns: await many(db, "select id, error, created_at from runs where status = 'failed' and created_at > now() - interval '7 days' order by created_at desc limit 20"),
     };
-    return { business: t, numbers, attention };
+    const { weekly_summary, ...business } = t;
+    return { business, numbers, attention, week: await weekNumbers(db), weeklySummary: weekly_summary };
   }));
+});
+
+// Overview → "This week": the owner can also have it on WhatsApp on Friday afternoons.
+admin.put("/businesses/:id/weekly-summary", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
+  const { on } = await parse(c, z.object({ on: z.boolean() }).strict());
+  await withTenant(tenantId, async (db) => {
+    await db.query("update tenants set settings = settings || $1::jsonb where id = app_current_tenant()", [{ weeklySummary: on }]);
+    await audit(db, { tenantId, actor: actor.audit, action: "weekly_summary.changed", entity: "tenant", entityId: tenantId, detail: { on } });
+  });
+  return c.json({ ok: true, on });
+});
+
+// Overview → replies waiting, one at a time: each reply with what the customer said, the most urgent first.
+admin.get("/businesses/:id/waiting", async (c) => {
+  const { tenantId } = tenantAccess(c, c.req.param("id"));
+  const rows = await withTenant(tenantId, (db) => many(db,
+    `select d.id, d.conversation_id, d.kind, d.category, d.reply_route, d.body, d.needs_attention, d.attention_reason, d.created_at,
+       coalesce((d.review->>'pass')::boolean, true) as review_pass, ct.name,
+       (select json_build_object('channel', m.channel, 'subject', m.subject, 'body', left(m.body, 1500), 'at', m.received_at)
+          from messages m where m.conversation_id = d.conversation_id and m.direction = 'in' order by m.received_at desc limit 1) as said,
+       (select count(*)::int from holds h where h.conversation_id = d.conversation_id and h.status = 'held') as held,
+       (d.kind = 'reply' and exists (select 1 from checkatrade_leads l where l.conversation_id = d.conversation_id and l.decision = 'pending')) as lead_pending
+     from drafts d join conversations v on v.id = d.conversation_id join contacts ct on ct.id = v.contact_id
+     where d.status = 'pending_approval' order by d.needs_attention desc, d.created_at limit 50`));
+  return c.json({ waiting: rows });
 });
 
 admin.get("/businesses/:id/setup", async (c) => {
@@ -124,22 +154,29 @@ admin.get("/businesses/:id/setup", async (c) => {
   const has = (kind: string) => t.conns.some((x) => x.kind === kind && x.status === "active");
   const on = (u: string) => t.useCases.some((x) => x.use_case === u && x.enabled);
   const settings = t.tenant.settings ?? {};
-  const steps = [
+  type SetupStep = { key: string; done: boolean; label: string; why: string; fix: string; needs?: string[]; admin?: boolean; optional?: boolean };
+  const bookingMode = t.useCases.some((x) => x.use_case === "book_appointments" && x.enabled) ? "calendar" : "other";
+  const list: SetupStep[] = [
     { key: "claude", done: ready.claude, label: "Claude key is set", why: "The agents can't read or reply without it.", fix: "/platform", admin: true },
-    { key: "details", done: Boolean(settings.services?.length && settings.signOff && settings.tone), label: "Business details filled in",
-      why: "Services, tone and sign-off are what the agents use to reply in your voice.", fix: "settings" },
+    { key: "details", done: Boolean(settings.services?.length && settings.signOff && settings.tone), label: "Your business details",
+      why: "Services, prices and sign-off are what the assistant uses to reply in your voice.", fix: "settings", needs: ["Your price list"] },
+    { key: "reply", done: Boolean(settings.replyStyle), label: "How replies sound", optional: true,
+      why: "Pick a tone and, if you like, paste a reply or two you've written so it sounds like you.", fix: "flows?flow=enquiry&step=reply", needs: ["A reply or two you've sent"] },
     { key: "inbox", done: ["gmail", "whatsapp", "web_form", "checkatrade_webhook", "sms_relay"].some(has), label: "Somewhere for enquiries to arrive",
-      why: "Connect Gmail, a WhatsApp number, a website form or Checkatrade.", fix: "connections" },
-    ...(on("book_appointments") ? [{ key: "calendar", done: has("google_calendar"), label: "Google Calendar connected",
-      why: "Booking offers real free times and holds them in this calendar.", fix: "connections" }] : []),
+      why: "Connect Gmail, a WhatsApp number, a website form or Checkatrade.", fix: "connections", needs: ["Your Google login"] },
+    ...(bookingMode === "calendar" ? [{ key: "calendar", done: has("google_calendar"), label: "Google Calendar connected",
+      why: "Booking offers real free times and pencils them in this calendar.", fix: "connections", needs: ["Your Google login"] }] : []),
     { key: "approver", done: (t.approvers?.n ?? 0) > 0, label: "Someone to approve replies",
-      why: "A person with a WhatsApp number who approves every reply before it's sent.", fix: "people" },
-    { key: "whatsapp", done: ready.whatsapp, label: "Platform WhatsApp is set up",
-      why: "Approval requests are sent from the platform's WhatsApp number. Until then, approve in this app's Inbox.", fix: "/platform", admin: true, optional: true },
-    { key: "active", done: t.tenant.status === "active", label: "Business switched on",
-      why: "Nothing is drafted while a business is onboarding or paused.", fix: "" },
+      why: "A person with a WhatsApp number who approves replies before they're sent.", fix: "people", needs: ["Your work mobile number"] },
+    { key: "whatsapp", done: ready.whatsapp, label: "Platform WhatsApp is set up", optional: true,
+      why: "Approval requests are sent from the platform's WhatsApp number. Until then, approve in this app.", fix: "/platform", admin: true },
   ];
-  return c.json({ steps, complete: steps.every((x) => x.done || (x as any).optional) });
+  // Switching on waits for everything that isn't optional.
+  const ready_ = list.every((x) => x.done || x.optional);
+  list.push({ key: "active", done: t.tenant.status === "active", label: "Switch on", why: ready_ ? "Nothing is answered until the business is switched on." : "Finish the steps above first.", fix: "" });
+  const steps = list.map((x) => ({ ...x, status: x.done ? "done" : x.key === "active" && !ready_ ? "blocked" : "todo" }));
+  const needs = [...new Set(steps.filter((x) => !x.done && !x.admin).flatMap((x) => x.needs ?? []))];
+  return c.json({ steps, needs, complete: steps.every((x) => x.done || x.optional) });
 });
 
 admin.put("/businesses/:id/status", async (c) => {
@@ -234,6 +271,26 @@ admin.get("/businesses/:id/flows", async (c) => {
     };
   });
   return c.json({ ...out, canManage: role !== "staff" });
+});
+
+// Flows → "Try it": a pretend message through the real flow. Read-only: nothing is saved, held or sent.
+const TRIES_PER_DAY = 30;
+admin.post("/businesses/:id/flows/try", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
+  const body = await parse(c, z.object({
+    message: z.string().trim().min(3, "Type a pretend message first").max(2000),
+    channel: z.enum(["email", "whatsapp"]).default("email"),
+  }).strict());
+  const used = await withTenant(tenantId, (db) => one<{ n: number }>(db, "select count(*)::int as n from audit_log where action = 'flow.tried' and at > now() - interval '1 day'"));
+  if ((used?.n ?? 0) >= TRIES_PER_DAY) throw new HTTPException(429, { message: `That's ${TRIES_PER_DAY} tries today. Try again tomorrow.` });
+  let result;
+  try { result = await tryEnquiry(tenantId, body.message, body.channel); }
+  catch (e) {
+    console.error("try flow failed", e instanceof Error ? e.message : e);
+    throw new HTTPException(502, { message: "The assistant couldn't finish this try. Check the Claude key on the Keys page, then try again." });
+  }
+  await withTenant(tenantId, (db) => audit(db, { tenantId, actor: actor.audit, action: "flow.tried", detail: { channel: body.channel } }));
+  return c.json(result);
 });
 
 // Industry booking systems a business might already take bookings in. We send their booking page link.
@@ -582,6 +639,17 @@ admin.get("/businesses/:id/runs/:runId", async (c) => {
   });
   if (!out) throw notFound();
   return c.json(out);
+});
+
+// "What happened": the audit log as plain sentences for owners.
+admin.get("/businesses/:id/feed", async (c) => {
+  const { tenantId } = tenantAccess(c, c.req.param("id"));
+  const before = Number(c.req.query("before")) || undefined;
+  const items = await withTenant(tenantId, async (db) => {
+    const tz = (await one<{ tz: string }>(db, "select coalesce(settings->>'timezone', 'Europe/London') as tz from tenants where id = app_current_tenant()"))?.tz ?? "Europe/London";
+    return feed(db, tz, { before, limit: limitOf(c, 60, 200) });
+  });
+  return c.json({ items });
 });
 
 admin.get("/businesses/:id/audit", async (c) => {
