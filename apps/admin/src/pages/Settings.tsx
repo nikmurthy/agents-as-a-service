@@ -106,9 +106,9 @@ function Form({ id, initial, canEdit }: { id: string; initial: any; canEdit: boo
           </Card>
 
           <Card title="Checks and data">
-            <Field label="Check every Nth reply closely" hint="1 means every reply gets the extra check.">
+            <Field label="Spot checks: when a kind of reply is automatic, still show me every…" hint="For example 3 means every 3rd one comes to you to check. 1 means every one does.">
               <input type="number" min={1} value={s.spotCheckEvery ?? ""} onChange={(e) => set("spotCheckEvery", num(e.target.value))} /></Field>
-            <Field label="Quality bar (1 to 5)">
+            <Field label="How good a reply must be to count as “Looks good” (1 to 5)" hint="Replies the checker scores lower are marked “Have a closer look”.">
               <input type="number" min={1} max={5} step={0.1} value={s.reviewerPassScore ?? ""} onChange={(e) => set("reviewerPassScore", num(e.target.value))} /></Field>
             <Field label="Keep customer messages for (days)" hint="After this, message text is removed.">
               <input type="number" min={7} value={s.retentionDays ?? ""} onChange={(e) => set("retentionDays", e.target.value === "" ? undefined : num(e.target.value))} /></Field>

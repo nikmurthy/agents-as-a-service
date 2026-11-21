@@ -2,11 +2,12 @@ import { Link } from "react-router-dom";
 import { get, put } from "../api";
 import { useBiz } from "../ctx";
 import { SetupChecklist } from "./Setup";
+import { ReplyQueue } from "./Queue";
 import { Card, Empty, ErrorNote, Loading, Page, useAction, useLoad, when } from "../ui";
 
 export function Overview() {
   const { id, business, canManage, isAdmin } = useBiz();
-  const { data, error } = useLoad(() => get(`/businesses/${id}`), [id]);
+  const { data, error, reload } = useLoad(() => get(`/businesses/${id}`), [id]);
   const pause = useAction();
   if (error) return <ErrorNote message={error} />;
   if (!data) return <Loading />;
@@ -15,17 +16,20 @@ export function Overview() {
   const paused = business.status === "paused";
   return (
     <Page title="Overview">
+      <ReplyQueue />
       <SetupChecklist />
+      <ThisWeek week={data.week} on={data.weeklySummary} canManage={canManage} onChange={reload} />
+      <h2 className="section">Today</h2>
       <div className="stats">
-        <Stat label="Messages in today" value={n.messages_today} />
+        <Stat label="Messages in" value={n.messages_today} />
         <Stat label="Replies waiting for you" value={n.drafts_waiting} to={`/b/${id}/inbox?waiting=1`} />
-        <Stat label="Replies sent today" value={n.replies_sent_today} />
-        <Stat label="Times being held" value={n.times_held} to={`/b/${id}/bookings`} />
-        <Stat label="Upcoming bookings" value={n.upcoming_bookings} to={`/b/${id}/bookings`} />
+        <Stat label="Replies sent" value={n.replies_sent_today} />
+        <Stat label="Times pencilled in" value={n.times_held} to={`/b/${id}/bookings`} />
+        <Stat label="Coming up" value={n.upcoming_bookings} to={`/b/${id}/bookings`} />
       </div>
-      <Card title="Needs attention">
-        {nothing && <Empty>Nothing needs attention.</Empty>}
-        {a.flaggedDrafts.map((d: any) => <Item key={d.id} to={`/b/${id}/inbox/${d.conversation_id}`} text={`Reply flagged: ${d.attention_reason}`} at={d.created_at} />)}
+      <Card title="Needs you">
+        {nothing && <Empty>Nothing needs you right now.</Empty>}
+        {a.flaggedDrafts.map((d: any) => <Item key={d.id} to={`/b/${id}/inbox/${d.conversation_id}`} text={`Have a closer look: ${d.attention_reason}`} at={d.created_at} />)}
         {a.failedSends.map((d: any) => <Item key={d.id} to={`/b/${id}/inbox/${d.conversation_id}`} text="A reply failed to send" at={d.created_at} bad />)}
         {a.brokenConnections.map((c: any) => <Item key={c.id} to={`/b/${id}/connections`} text={`${c.kind.replace("_", " ")} connection problem: ${c.last_error ?? "unknown error"}`} bad />)}
         {a.failedRuns.map((r: any) => <Item key={r.id} to={`/b/${id}/activity/${r.id}`} text="A message couldn't be processed" at={r.created_at} bad />)}
@@ -49,6 +53,37 @@ export function Overview() {
         </Card>
       )}
     </Page>
+  );
+}
+
+// A calm weekly "here's what I did": facts, no streaks, no guilt. Optionally on WhatsApp on Friday afternoons.
+function ThisWeek({ week, on, canManage, onChange }: { week: any; on: boolean; canManage: boolean; onChange: () => void }) {
+  const { id } = useBiz();
+  const t = useAction();
+  if (!week) return null;
+  const quiet = !week.messagesIn && !week.repliesSent && !week.booked;
+  const mins = week.avgMinutesToReply;
+  const speed = mins == null ? "–" : mins < 60 ? `${Math.max(1, mins)} min` : mins < 2880 ? `${Math.round(mins / 60)} h` : `${Math.round(mins / 1440)} days`;
+  return (
+    <Card title="This week">
+      {quiet ? <p className="muted">Nothing yet this week. When messages come in, you'll see what got done here.</p> : (
+        <dl className="week">
+          <div><dt>Replies sent</dt><dd>{week.repliesSent}</dd></div>
+          <div><dt>Average time to reply</dt><dd>{speed}</dd></div>
+          <div><dt>Appointments booked</dt><dd>{week.booked}</dd></div>
+          <div><dt>Quotes chased</dt><dd>{week.quotesChased}</dd></div>
+          {week.feedbackAsked > 0 && <div><dt>Asked how it went</dt><dd>{week.feedbackAsked}</dd></div>}
+          {week.sentAutomatically > 0 && <div><dt>Sent automatically</dt><dd>{week.sentAutomatically}</dd></div>}
+        </dl>
+      )}
+      <p className="muted small">The last 7 days. {week.messagesIn} {week.messagesIn === 1 ? "message" : "messages"} came in.</p>
+      {canManage && (
+        <label className="row switch toggle"><span>Send me this on WhatsApp on Friday afternoons</span>
+          <input type="checkbox" role="switch" checked={on} disabled={t.busy}
+            onChange={(e) => t.run(async () => { await put(`/businesses/${id}/weekly-summary`, { on: e.target.checked }); onChange(); })} /></label>
+      )}
+      <ErrorNote message={t.error} />
+    </Card>
   );
 }
 

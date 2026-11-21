@@ -1,13 +1,14 @@
 import { useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { get, put } from "../api";
+import { get, post, put } from "../api";
+import { Icon, type IconName } from "../icons";
 import { useBiz } from "../ctx";
 import { Card, ErrorNote, Loading, Page, useAction, useLoad } from "../ui";
 
 // Each flow is a row of steps. Tap a step to see what it does and, where there's a choice, to change it.
 // The choices are settings the code enforces (not instructions to the AI), so they are always followed.
 
-type Step = { key: string; title: string; sub: string; tone?: "in" | "you" | "out"; setting?: boolean };
+type Step = { key: string; title: string; sub: string; icon: IconName; tone?: "in" | "you" | "out"; setting?: boolean };
 
 const CONNECTED: Record<string, string> = {
   gmail: "Gmail", whatsapp: "WhatsApp", web_form: "Website form", checkatrade_webhook: "Checkatrade (webhook)", sms_relay: "Texts from a Mac", google_calendar: "Google Calendar",
@@ -20,6 +21,7 @@ export function Flows() {
   const [params, setParams] = useSearchParams();
   const flow = params.get("flow") === "quotes" ? "quotes" : "enquiry";
   const step = params.get("step") ?? (flow === "quotes" ? "wait" : "approve");
+  const [lit, setLit] = useState<number | null>(null); // Try it: how far the pretend message has got
   const go = (f: string, s: string, scroll = false) => {
     setParams({ flow: f, step: s }, { replace: true });
     // On a phone the details are below the steps: bring them into view.
@@ -37,46 +39,75 @@ export function Flows() {
   const save = (key: string, body: object) => a.run(async () => { await put(`/businesses/${id}/flows/${key}`, body); reload(); });
   const ro = !canManage || a.busy;
 
+  const anyAuto = data.kinds.some((k: any) => k.state === "on");
+  const preset = PRESETS.find((p) => p.key === data.reply.style.preset);
   const enquirySteps: Step[] = [
-    { key: "arrive", title: "Message arrives", sub: "Email, WhatsApp, form, Checkatrade, texts", tone: "in" },
-    { key: "triage", title: "Triage", sub: "What is it? How urgent?" },
-    { key: "booking", title: "Booking", sub: bookingMode === "link" ? `Sends your ${systemName(bk.system)} booking link` : offersTimes && calendar ? "Offers free times" : "You arrange the time", setting: true },
-    { key: "reply", title: "Reply", sub: `${PRESETS.find((p) => p.key === data.reply.style.preset)?.label ?? "Your tone of voice"}, then checked`, setting: true },
-    { key: "approve", title: "You approve", sub: data.learnAfter === 0 ? "Always asks you" : `Learns: offers to automate after ${data.learnAfter}`, tone: "you", setting: true },
-    { key: "sent", title: "Sent", sub: "By email or WhatsApp, or you send it", tone: "out" },
-    { key: "feedback", title: "Feedback", sub: uc.ask_feedback.enabled ? `Asks how it went, ${dayWord(uc.ask_feedback.config.afterDays ?? data.defaults.feedbackAfterDays)}` : "Off", setting: true },
+    { key: "arrive", title: "Message arrives", sub: "Email, WhatsApp, form, Checkatrade, texts", icon: "mail", tone: "in" },
+    { key: "triage", title: "Read and sort", sub: "What is it? How urgent?", icon: "sort" },
+    { key: "booking", title: "Booking", icon: bookingMode === "link" ? "link" : bookingMode === "offer" && calendar ? "calendar" : "person",
+      sub: bookingMode === "link" ? `Sends your ${systemName(bk.system)} booking link` : offersTimes && calendar ? "Offers free times" : "You arrange the time", setting: true },
+    { key: "reply", title: "Reply", sub: `${preset?.label ?? "Your tone of voice"}, then checked`, icon: "pen", setting: true },
+    { key: "approve", title: "You approve", icon: anyAuto ? "auto" : "person", sub: anyAuto ? "Some kinds go automatically" : data.learnAfter === 0 ? "Always asks you" : `Learns: offers to automate after ${data.learnAfter}`, tone: "you", setting: true },
+    { key: "sent", title: "Sent", sub: "By email or WhatsApp, or you send it", icon: "send", tone: "out" },
+    { key: "feedback", title: "Feedback", icon: uc.ask_feedback.enabled ? "star" : "off", sub: uc.ask_feedback.enabled ? `Asks how it went, ${dayWord(uc.ask_feedback.config.afterDays ?? data.defaults.feedbackAfterDays)}` : "Off", setting: true },
   ];
   const quoteSteps: Step[] = [
-    { key: "marked", title: "Quote sent", sub: "You mark it in the Inbox", tone: "in" },
-    { key: "wait", title: "Wait", sub: uc.chase_quotes.enabled ? `${uc.chase_quotes.config.afterDays ?? data.defaults.chaseAfterDays} quiet days` : "Off", setting: true },
-    { key: "nudge", title: "Follow-up", sub: "One polite nudge" },
-    { key: "approve", title: "You approve", sub: kindState(data, "quote_followup"), tone: "you", setting: true },
-    { key: "sent", title: "Sent", sub: "Once only", tone: "out" },
+    { key: "marked", title: "Quote sent", sub: "You mark it in the Inbox", icon: "quote", tone: "in" },
+    { key: "wait", title: "Wait", icon: uc.chase_quotes.enabled ? "clock" : "off", sub: uc.chase_quotes.enabled ? `${uc.chase_quotes.config.afterDays ?? data.defaults.chaseAfterDays} quiet days` : "Off", setting: true },
+    { key: "nudge", title: "Follow-up", sub: "One polite nudge", icon: "pen" },
+    { key: "approve", title: "You approve", icon: data.kinds.find((k: any) => k.key === "quote_followup")?.state === "on" ? "auto" : "person", sub: kindState(data, "quote_followup"), tone: "you", setting: true },
+    { key: "sent", title: "Sent", sub: "Once only", icon: "send", tone: "out" },
   ];
   const steps = flow === "quotes" ? quoteSteps : enquirySteps;
+  const trying = flow === "enquiry" && step === "try";
   const current = steps.find((s) => s.key === step) ?? steps[0];
+  // Links, not buttons, so the phrases wrap like the rest of the sentence.
+  const P = ({ to, children }: { to: string; children: ReactNode }) => (
+    <Link className="phrase" to={{ search: `?flow=${flow}&step=${to}` }} replace onClick={(e) => { e.preventDefault(); go(flow, to, true); }}>{children}</Link>);
+  const tone = preset ? { friendly: "warmly", professional: "politely and professionally", brief: "briefly" }[preset.key] : "in your own tone of voice";
+  const st = data.reply.style ?? {};
+  const fbDays = uc.ask_feedback.config.afterDays ?? data.defaults.feedbackAfterDays;
+  const enquirySentence = (<>
+    When a message arrives, I'll <P to="triage">read it and sort it</P>, {" "}
+    <P to="booking">{bookingMode === "link" ? `send your ${systemName(bk.system)} booking link` : offersTimes && calendar ? "offer up to 3 free times from your calendar" : "say you'll be in touch to arrange a time"}</P>
+    {" "}when someone wants an appointment, write back <P to="reply">{tone}{st.spelling === "american" ? ", in American English" : ", in British English"}</P>,
+    {" "}<P to="approve">{anyAuto ? "send the kinds of reply you've chosen automatically and ask you about the rest"
+      : data.learnAfter === 0 ? "ask you before anything is sent" : `ask you before anything is sent, and offer to automate a kind of reply once you've approved ${data.learnAfter} in a row`}</P>,
+    {" "}then <P to="feedback">{uc.ask_feedback.enabled ? `ask the customer how it went ${dayWord(fbDays)} after the job` : "stop there (asking for feedback is off)"}</P>.
+  </>);
+  const quoteSentence = uc.chase_quotes.enabled ? (<>
+    When you <P to="marked">mark a quote as sent</P>, I'll <P to="wait">wait {uc.chase_quotes.config.afterDays ?? data.defaults.chaseAfterDays} days</P> for a reply,
+    {" "}then <P to="nudge">write one polite follow-up</P> and <P to="approve">{data.kinds.find((k: any) => k.key === "quote_followup")?.state === "on" ? "send it automatically" : "ask you before it's sent"}</P>.
+  </>) : <>Chasing quotes is off. <P to="wait">Switch it on</P> and I'll nudge customers who go quiet after a quote.</>;
 
   return (
     <Page title="Flows">
-      <p className="lead">How the assistant handles work for you, step by step. Tap a step to see what it does. Steps marked ⚙ have choices.</p>
-      <div className="seg" role="tablist" aria-label="Flows" style={{ marginBottom: "1rem" }}>
-        <button role="tab" aria-selected={flow === "enquiry"} onClick={() => go("enquiry", "approve")}>Enquiry flow</button>
-        <button role="tab" aria-selected={flow === "quotes"} onClick={() => go("quotes", "wait")}>Chasing quotes</button>
+      <p className="lead">How the assistant handles work for you, step by step. Tap a step, or the underlined words, to see what it does. Steps marked ⚙ have choices. Press <strong>Try it</strong> to watch a pretend message go through.</p>
+      <div className="flow-tools">
+        <div className="seg" role="tablist" aria-label="Flows">
+          <button role="tab" aria-selected={flow === "enquiry"} className={flow === "enquiry" ? "on" : ""} onClick={() => go("enquiry", "approve")}>Enquiry flow</button>
+          <button role="tab" aria-selected={flow === "quotes"} className={flow === "quotes" ? "on" : ""} onClick={() => go("quotes", "wait")}>Chasing quotes</button>
+        </div>
+        {flow === "enquiry" && <button className={trying ? "primary" : ""} onClick={() => go("enquiry", "try", true)}><Icon name="play" size={16} /> Try it</button>}
       </div>
       <ol className={`flow flow-${steps.length}`}>
-        {steps.map((s) => (
+        {steps.map((s, i) => (
           <li key={s.key}>
-            <button className={`flow-step ${s.tone ?? ""} ${s.key === current.key ? "selected" : ""}`} aria-pressed={s.key === current.key} onClick={() => go(flow, s.key, true)}>
+            <button className={`flow-step ${s.tone ?? ""} ${!trying && s.key === current.key ? "selected" : ""} ${trying && lit !== null && i <= lit ? "lit" : ""}`} aria-pressed={!trying && s.key === current.key} onClick={() => go(flow, s.key, true)}>
+              <Icon name={s.icon} />
               <strong>{s.title}{s.setting ? " ⚙" : ""}</strong><span>{s.sub}</span>
             </button>
           </li>
         ))}
       </ol>
+      <p className="sentence">{flow === "quotes" ? quoteSentence : enquirySentence}</p>
       <div id="step-details" />
       <ErrorNote message={a.error} />
       {!canManage && <p className="note">Only owners can change these.</p>}
 
-      {flow === "enquiry" && current.key === "arrive" && (
+      {trying && <TryIt pack={data.reply.pack} canManage={canManage} setLit={setLit} />}
+
+      {!trying && flow === "enquiry" && current.key === "arrive" && (
         <Card title="Message arrives">
           <p>Every new message becomes an enquiry in your Inbox, wherever it came from.</p>
           <h3>Connected now</h3>
@@ -88,7 +119,7 @@ export function Flows() {
       )}
 
       {flow === "enquiry" && current.key === "triage" && (
-        <Card title="Triage">
+        <Card title="Read and sort">
           <p>Reads the message and works out what the person wants, how urgent it is, and what should happen next.</p>
           <Always items={["Spam is ignored", "Emergencies, complaints and health questions go straight to you, and are never sent automatically",
             "New Checkatrade leads get a suggestion: I'm interested, or Not for me", "It never sees customers' email addresses or phone numbers"]} />
@@ -298,21 +329,37 @@ function Approve({ data, canManage, save, busy, reload, only }: { data: any; can
           </select></label>
       )}
       <h3>Kinds of reply</h3>
-      <div className="list">
-        {kinds.map((k: any) => (
-          <div key={k.key} className="row">
-            <div style={{ flex: "1 1 14rem" }}>
-              <strong>{k.label}</strong>
-              <div className="muted small">{k.example}</div>
-              <div className="small">{k.state === "on" ? <span className="pill good">Automatic</span>
-                : k.state === "offered" ? <span className="pill warn">Offered: waiting for your answer</span>
-                : learning ? <span className="muted">{Math.min(k.streak, n)} of {n} approved unchanged in a row{k.state === "declined" ? " · you said keep asking" : ""}</span>
-                : <span className="muted">Always asks you</span>}
-                {k.sentAutomatically > 0 && <span className="muted"> · {k.sentAutomatically} sent automatically so far</span>}</div>
+      <p className="muted small">Each kind climbs a ladder: <strong>Asking you</strong>, then <strong>Ready to offer</strong> once you've approved {n} in a row without changes, then <strong>Automatic</strong> only if you say yes.</p>
+      <div className="ladders">
+        {kinds.map((k: any) => {
+          const rung = k.state === "on" ? 2 : k.state === "offered" ? 1 : 0;
+          const shown = Math.min(k.streak, n);
+          return (
+            <div key={k.key} className="ladder-card">
+              <div className="ladder-top">
+                <div><strong>{k.label}</strong><div className="muted small">{k.example}</div></div>
+                <label className="switch"><span className="small">{k.state === "on" ? "Automatic" : "Ask me"}</span>
+                  <input type="checkbox" role="switch" aria-label={`Send ${k.label.toLowerCase()} automatically`} checked={k.state === "on"} disabled={ro || !learning}
+                    onChange={(e) => setAuto(k.key, e.target.checked)} /></label>
+              </div>
+              {learning ? (<>
+                <ol className="ladder" aria-label={`${k.label}: ${["Asking you", "Ready to offer", "Automatic"][rung]}`}>
+                  {["Asking you", "Ready to offer", "Automatic"].map((w, i) => <li key={w} className={i === rung ? "here" : i < rung ? "past" : ""}>{w}</li>)}
+                </ol>
+                {rung === 0 && (<>
+                  <div className="track" role="progressbar" aria-valuemin={0} aria-valuemax={n} aria-valuenow={shown} aria-label="Approved without changes"><i style={{ width: `${(shown / n) * 100}%` }} /></div>
+                  <div className="muted small">{shown} of {n} approved without changes{k.state === "declined" ? ". You said keep asking, so it won't be offered again; switch it on here any time." : shown === 0 && k.streak === 0 ? ". Changing or rejecting one starts the count again." : ""}</div>
+                </>)}
+                {rung === 1 && <div className="small">Ready: you approved {n} in a row without changes. Answer in the Inbox or on WhatsApp, or use the switch.</div>}
+                {rung === 2 && <div className="muted small">{k.sentAutomatically} sent automatically so far. Changing or rejecting a spot check sends it back to asking you.</div>}
+              </>) : <div className="muted small">Always asks you.</div>}
             </div>
-            <label className="row-meta switch"><span className="small">{k.state === "on" ? "Automatic" : "Ask me"}</span>
-              <input type="checkbox" role="switch" aria-label={`Send ${k.label.toLowerCase()} automatically`} checked={k.state === "on"} disabled={ro || !learning}
-                onChange={(e) => setAuto(k.key, e.target.checked)} /></label>
+          );
+        })}
+        {!only && NEVER.map(([label, why]) => (
+          <div key={label} className="ladder-card locked">
+            <div className="ladder-top"><div><strong><Icon name="lock" size={16} /> {label}</strong><div className="muted small">{why}</div></div>
+              <span className="pill warn">Always asks you</span></div>
           </div>
         ))}
       </div>
@@ -321,8 +368,85 @@ function Approve({ data, canManage, save, busy, reload, only }: { data: any; can
       <Always items={[
         `Spot checks: even when automatic, ${data.spotCheckEvery <= 1 ? "every one" : `every ${ordinal(data.spotCheckEvery)} one`} still comes to you (change this in Settings). If you change or reject one, that kind goes back to asking you.`,
         "You're told on WhatsApp every time something is sent automatically",
-        "Never automatic: complaints, emergencies, health questions, flagged drafts, new Checkatrade leads, moving a booking, and anything sent by text, phone or Checkatrade",
+        "Never automatic: anything sent by text, phone or Checkatrade, because you send those yourself",
       ]} />
+    </Card>
+  );
+}
+
+const NEVER: [string, string][] = [
+  ["Complaints and emergencies", "Someone unhappy, or something urgent, should always hear from you."],
+  ["Health questions", "Anything about someone's health needs your judgement."],
+  ["New Checkatrade leads", "You decide Interested or Not for me in Checkatrade yourself."],
+  ["Moving a booking", "Changes to your diary always come to you."],
+  ["Anything flagged", "Replies the checker wasn't sure about come to you to look at closely."],
+];
+
+// Try it: a pretend message played through the real flow. Nothing is saved, pencilled in or sent.
+const SAMPLES: Record<string, string[]> = {
+  trade: [
+    "Hi, could you quote for new flooring in our hallway? It's about 6m². Any chance you could come and measure next week?",
+    "Do you do Saturday visits? And roughly how much is carpet for a double bedroom?",
+    "The floor you fitted last month has gaps opening up and I'm not happy about it.",
+  ],
+  practice: [
+    "Hi, I'd like to book an initial consultation. Do you have anything next week?",
+    "Do you see children, and how much is a first appointment?",
+    "I've been feeling dizzy since starting the supplements you suggested. Is that normal?",
+  ],
+};
+
+function TryIt({ pack, canManage, setLit }: { pack: string; canManage: boolean; setLit: (n: number | null) => void }) {
+  const { id } = useBiz();
+  const samples = SAMPLES[pack === "practitioner" ? "practice" : "trade"];
+  const [text, setText] = useState(samples[0]);
+  const [channel, setChannel] = useState("email");
+  const [out, setOut] = useState<any>();
+  const [shown, setShown] = useState(0);
+  const a = useAction();
+  // Light up the blocks one by one while the assistant works: arrive, read and sort, booking, reply, approve.
+  const play = () => a.run(async () => {
+    setOut(undefined); setShown(0); setLit(0);
+    let i = 0;
+    const timer = setInterval(() => { i = Math.min(i + 1, 3); setLit(i); }, 1400);
+    try {
+      const r = await post(`/businesses/${id}/flows/try`, { message: text, channel });
+      setOut(r);
+      const BLOCK: Record<string, number> = { triage: 1, booking: 2, reply: 3, approve: 4 };
+      r.steps.forEach((s: any, k: number) => setTimeout(() => { setShown(k + 1); setLit(BLOCK[s.key] ?? 1); }, 350 * (k + 1)));
+    } catch (e) { setLit(null); throw e; }
+    finally { clearInterval(timer); }
+  });
+  return (
+    <Card title="Try it with a pretend message">
+      <p className="muted small">Watch what would happen to a message like this, using your real settings. <strong>Nothing is sent and your calendar isn't touched.</strong></p>
+      {!canManage ? <p className="note">Only owners can try messages.</p> : (<>
+        <div className="chips" role="group" aria-label="Example messages">
+          {samples.map((x, i) => <button key={i} className={`chip ${text === x ? "on" : ""}`} onClick={() => setText(x)}>Example {i + 1}</button>)}
+        </div>
+        <label className="field"><span className="label">The pretend message</span>
+          <textarea rows={3} value={text} maxLength={2000} onChange={(e) => setText(e.target.value)} /></label>
+        <div className="buttons">
+          <label className="check"><span>Arrives by</span>
+            <select value={channel} onChange={(e) => setChannel(e.target.value)} style={{ width: "auto" }}><option value="email">Email</option><option value="whatsapp">WhatsApp</option></select></label>
+          <button className="primary" disabled={a.busy || text.trim().length < 3} onClick={play}><Icon name="play" size={16} /> {a.busy ? "Working it through…" : "Play it through"}</button>
+        </div>
+        <ErrorNote message={a.error} />
+        {a.busy && <p className="muted small" aria-live="polite">Reading it, checking your calendar and writing a reply. This takes about half a minute.</p>}
+        {out && (
+          <div aria-live="polite">
+            <ol className="try-steps">
+              {out.steps.slice(0, shown).map((s: any) => (
+                <li key={s.key} className={s.flag ? "flag" : ""}><span className="tick" aria-hidden>{s.flag ? "!" : "✓"}</span><div><strong>{s.title}</strong><div className="small">{s.detail}</div></div></li>
+              ))}
+            </ol>
+            {out.reply && shown >= out.steps.length && (<>
+              <h3>The reply Sam would get</h3>
+              <p className="draft-body">{out.reply}</p>
+            </>)}
+          </div>
+        )}
+      </>)}
     </Card>
   );
 }

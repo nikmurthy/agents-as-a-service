@@ -4,7 +4,7 @@ import { Card, ErrorNote, Loading, Page, useLoad, when } from "../ui";
 // Plain-English explanations. The definitions themselves (model, instructions, tools) come from the API.
 const ABOUT: Record<string, { name: string; job: string; does: string[]; never: string[] }> = {
   triage: {
-    name: "Triage",
+    name: "Read and sort (triage)",
     job: "Reads every new message and decides what it is.",
     does: ["Works out what the person wants and how urgent it is", "Picks the next step: book, answer, pass to you, or ignore", "Flags anything a person should handle (complaints, emergencies, health questions)"],
     never: ["Replies to anyone", "Sees email addresses or phone numbers"],
