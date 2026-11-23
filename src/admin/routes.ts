@@ -8,6 +8,8 @@ import { requireUser, requireAdmin, tenantAccess, type Access } from "./auth.js"
 import { newBusinessSchema, replyStyleSchema, scrubExample, tenantSettingsSchema, USE_CASES } from "../settings-schema.js";
 import { addWebhook, connectWhatsApp, createTenant, HOOK_PATH, setTenantStatus, type HookKind } from "../onboarding.js";
 import { googleConnectLink } from "../google-link.js";
+import { whatsappConnectLink } from "../whatsapp-link.js";
+import { ignorePerson, stopIgnoring } from "../whatsapp-business.js";
 import { approveDraft, editAndApproveDraft, rejectDraft, type DecisionResult } from "../decisions.js";
 import { addContactDetails } from "../leads.js";
 import { answerOffer, automationState, CATEGORIES, DEFAULT_LEARN_AFTER, learnAfter, unchangedStreak } from "../automation.js";
@@ -362,7 +364,8 @@ admin.put("/businesses/:id/automations/:category", async (c) => {
 admin.get("/businesses/:id/connections", async (c) => {
   const { tenantId, role } = tenantAccess(c, c.req.param("id"));
   const rows = await withTenant(tenantId, (db) => many(db,
-    "select id, kind, external_id, label, status, last_error, config->>'grant' as account, created_at from channel_connections order by kind, created_at"));
+    "select id, kind, external_id, label, status, last_error, config->>'grant' as account, (config->>'coexistence')::boolean as coexistence, created_at from channel_connections order by kind, created_at"));
+  const t = await withTenant(tenantId, (db) => one<{ people: string | null }>(db, "select settings->>'whatsappPeople' as people from tenants where id = app_current_tenant()"));
   const connections = rows.map((r) => {
     const isHook = r.kind in HOOK_PATH;
     const { external_id, ...rest } = r;
@@ -373,7 +376,23 @@ admin.get("/businesses/:id/connections", async (c) => {
       connectedAs: isHook ? undefined : external_id,
     };
   });
-  return c.json({ connections });
+  return c.json({ connections, whatsappPeople: t?.people === "everyone" ? "everyone" : "new_and_customers", whatsappSignupReady: !!(env.metaAppId && env.metaSignupConfigId) });
+});
+
+admin.get("/businesses/:id/connections/whatsapp-link", (c) => {
+  const { tenantId } = tenantAccess(c, c.req.param("id"), "manage");
+  return c.json({ url: whatsappConnectLink(tenantId) });
+});
+
+/** On a sole trader's one WhatsApp number: answer only new people and existing customers (default), or everyone. */
+admin.put("/businesses/:id/whatsapp-people", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
+  const { people } = await parse(c, z.object({ people: z.enum(["new_and_customers", "everyone"]) }));
+  await withTenant(tenantId, async (db) => {
+    await db.query("update tenants set settings = settings || $1::jsonb where id = app_current_tenant()", [{ whatsappPeople: people }]);
+    await audit(db, { tenantId, actor: actor.audit, action: "whatsapp_people.changed", entity: "tenant", entityId: tenantId, detail: { people } });
+  });
+  return c.json({ ok: true });
 });
 
 admin.get("/businesses/:id/connections/google-link", (c) => {
@@ -505,7 +524,7 @@ admin.get("/businesses/:id/conversations/:convId", async (c) => {
   const convId = uuid(c.req.param("convId"));
   const out = await withTenant(tenantId, async (db) => {
     const conv = await one(db,
-      `select v.id, v.status, v.quoted_at, v.chased_at, v.completed_at, v.feedback_asked_at, ct.name,
+      `select v.id, v.status, v.quoted_at, v.chased_at, v.completed_at, v.feedback_asked_at, ct.name, ct.ignored_at,
          (select max(h.end_at) from holds h where h.conversation_id = v.id and h.status = 'confirmed') as booked_until
        from conversations v join contacts ct on ct.id = v.contact_id where v.id = $1`, [convId]);
     if (!conv) return undefined;
@@ -524,6 +543,19 @@ admin.get("/businesses/:id/conversations/:convId", async (c) => {
   });
   if (!out) throw notFound();
   return c.json(out);
+});
+
+// "Ignore this person": a personal chat, not a customer. Drops what's waiting, forgets their message text.
+admin.post("/businesses/:id/conversations/:convId/ignore", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"));
+  if (!(await ignorePerson(tenantId, uuid(c.req.param("convId")), actor.audit))) throw notFound();
+  return c.json({ ok: true });
+});
+
+admin.post("/businesses/:id/conversations/:convId/unignore", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"));
+  if (!(await stopIgnoring(tenantId, uuid(c.req.param("convId")), actor.audit))) throw notFound();
+  return c.json({ ok: true });
 });
 
 admin.post("/businesses/:id/conversations/:convId/quote", async (c) => {
@@ -770,7 +802,7 @@ admin.get("/platform/status", (c) => {
 
 admin.post("/platform/test/:service", async (c) => {
   const { email } = requireAdmin(c);
-  const service = z.enum(["claude", "google", "whatsapp"]).parse(c.req.param("service"));
+  const service = z.enum(["claude", "google", "whatsapp", "whatsapp_signup"]).parse(c.req.param("service"));
   const result = await testService(service);
   await withAdmin((db) => audit(db, { tenantId: null, actor: `admin:${email}`, action: "platform.key_tested", entity: "service", entityId: service, detail: { ok: result.ok } }));
   return c.json(result);

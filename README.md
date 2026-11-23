@@ -31,6 +31,8 @@ One platform serves many businesses ("tenants"). Each picks an **industry pack**
 
 **Channels out:** WhatsApp (inside the 24-hour window) and email are sent automatically after approval. For Checkatrade, texts and phone calls, the owner gets the final wording to paste or say.
 
+**One number for a sole trader.** A sole trader can connect the one number they already use in the **WhatsApp Business app**, and keep using the app as now (Meta "coexistence"). Customers message that number; approved replies go from it; approvals arrive as a separate chat from the platform's number, or in the admin app. People saved in their phone are left alone unless they're already customers, any chat can be marked **Not a customer? Ignore**, and if the owner answers a customer themselves in the app, the waiting draft is dropped. This needs Meta Tech Provider approval; until then, test with Meta's test numbers. Step by step: `docs/whatsapp-setup.md`.
+
 ## How it works
 
 ```
@@ -80,7 +82,7 @@ A phone-friendly web app at `/admin/` on the same server. Owners and staff see o
 | **Inbox** | Every conversation with its full thread. Drafts show their review scores and an **Approve / Edit / Reject** that works exactly like WhatsApp. Also here: Checkatrade lead cards, **Job done**, "sent automatically" labels, spot-check notes, and automation offers. |
 | **Flows** | Each flow drawn as a row of picture steps, each icon showing the choice made, with the whole flow read as one sentence underneath (tap any underlined part to change it). **Try it** plays a pretend message through the flow and shows the exact reply, without saving, holding or sending anything (owners only, 30 a day). **You approve** shows a trust ladder per kind of reply: Asking you → Ready to offer → Automatic, with a progress bar; kinds that are never automated show a lock and why. **Enquiry flow:** Message arrives → Triage → Booking ⚙ → Reply ⚙ → You approve ⚙ → Sent → Feedback ⚙. **Chasing quotes:** Quote sent → Wait ⚙ → Follow-up → You approve ⚙ → Sent. |
 | **Settings** | Name, sign-off, services and prices, hours, service area, reply routes per channel, spot-check rate, data retention. |
-| **Connections** | Google (Gmail + Calendar), WhatsApp number, website form and Checkatrade webhooks, the Mac text relay. |
+| **Connections** | Google (Gmail + Calendar); **Your WhatsApp Business number** (a connect link for the owner) and **Who gets an answer on WhatsApp** (new people and customers, or everyone); a number by its ID for Meta test numbers; website form and Checkatrade webhooks; the Mac text relay. |
 | **People** | Owners, staff and approvers, and their WhatsApp numbers. |
 | **Bookings** | Held and confirmed appointments. |
 | **What happened** | Everything as plain sentences, such as "Sent the reply to Sam automatically by WhatsApp", each saying why, with a **Switch back to asking me** link on automatic sends. The **Details** and **Audit log** tabs keep every agent run with its outcome, versions and cost. |
@@ -109,6 +111,7 @@ The whole app uses the Atkinson Hyperlegible font (made for low-vision readers),
 | Approve or automate, offers, spot checks | `src/automation.ts` |
 | WhatsApp approvals and buttons | `src/approvals.ts` |
 | Approve / reject / edit, shared by WhatsApp and the web app | `src/decisions.ts` |
+| One WhatsApp number: personal chats left alone, the owner's own replies, "ignore this person", Embedded Signup | `src/whatsapp-business.ts` |
 | Sending | `src/outbox.ts` |
 | Diary: availability, holds, confirmation | `src/calendar.ts` |
 | Checkatrade lead reading and suggestions | `src/leads.ts`, `src/channels/parse.ts` |
@@ -132,6 +135,7 @@ Changes arrive as pull requests. To release one:
 
 | # | Date | What changed |
 |---|---|---|
+| 19 | 24 Nov 2026 | **One WhatsApp number for a sole trader:** connect the WhatsApp Business app number through Meta's Embedded Signup and keep using the app. Personal chats are left alone (saved contacts kept only as hashes; "Not a customer? Ignore"); a reply the owner sends from the app drops the waiting draft; the platform number is now optional (approve in the app). Triage agent 1.2.0 sets personal messages aside. |
 | 18 | 21 Nov 2026 | **Making it obvious:** all nine design ideas. Replies waiting one at a time; setup as a task list; This week, with an optional Friday WhatsApp summary; the flow as pictures and a sentence; **Try it**; the trust ladder; "What happened" in plain sentences with a switch-back link; plain words, a more readable font and bigger buttons throughout. |
 | 17 | 21 Nov 2026 | This README and `docs/design-ideas.md`. |
 | 16 | 20 Nov 2026 | **Flows → Reply:** pick a tone (Warm and friendly, Professional, Short), each with a sector example, or describe your own. Also set the details (greeting, length, emoji, spelling, words to avoid) and paste up to three of your own replies to copy the style of. Contact details are removed from examples. Drafting agent 1.5.0. |
@@ -296,7 +300,7 @@ For local work, `npm run admin:install && npm run admin:dev` runs the app with h
 TEST_DATABASE_URL=postgres://...throwaway... npm test
 ```
 
-The tests wipe that database. They run whole journeys against real Postgres, with Google, WhatsApp and the AI faked (`AGENT_MODE=mock`). There are 77 tests across `test/platform`, `admin`, `flows`, `chase`, `checkatrade` and `runner`. Among the things they check:
+The tests wipe that database. They run whole journeys against real Postgres, with Google, WhatsApp and the AI faked (`AGENT_MODE=mock`). There are 88 tests across `test/platform`, `admin`, `flows`, `chase`, `checkatrade`, `whatsapp` and `runner`. Among the things they check:
 
 - **Enquiries:** a WhatsApp enquiry gets held times, an approval and a sent reply. The customer picks a time, the booking is confirmed, and the other holds are released.
 - **Owner decisions:** an owner's edit is sent as written. A complaint is flagged and nothing is sent. A double-tapped button doesn't send twice, on WhatsApp or the web.
@@ -314,12 +318,13 @@ The tests wipe that database. They run whole journeys against real Postgres, wit
 - **Chasing quotes:** one follow-up, and none if the customer replied, opted out, or the quote is too old.
 - **Keeping businesses apart:** one business can't see another's data, in the database, API or web app, including automations and Checkatrade leads.
 - **Making it obvious:** replies waiting come in the right order; "What happened" says why each automatic send went and offers the switch back; **Try it** writes nothing and sends nothing, and flags a complaint; the weekly summary counts correctly and isn't sent for an empty week.
+- **One WhatsApp number:** connecting through Embedded Signup (token swapped and stored encrypted, webhooks subscribed, contacts requested, history not); saved contacts stored only as hashes and invisible to other businesses; a friend saved in the phone isn't stored, while a new person and an existing customer are answered; a personal message is set aside; the owner's own reply drops the draft and frees held times; "ignore this person" deletes their text and stops new messages being kept.
 - **Records and data rights:** the audit log can't be edited. Erasing a person removes their details and cancels their booking.
 
 ## Limits to know before the first customers
 
 - **Google verification.** While the Google app is in *Testing*, only listed test users can connect (up to 100), and their connection expires every 7 days. Submit for verification before real customers. Reading Gmail is a restricted scope and needs an annual independent security assessment.
-- **WhatsApp for each business** is connected by hand for now (phone number ID + token). For scale, become a Meta Tech Provider and add Embedded Signup. WhatsApp replies only go out within 24 hours of the customer's last message.
+- **WhatsApp for each business:** connecting a business's own WhatsApp Business app number is built but switched off until Meta approves the platform as a Tech Provider (`docs/whatsapp-setup.md`, Part B). Until then numbers are connected by ID, which suits Meta's test numbers. WhatsApp replies only go out within 24 hours of the customer's last message.
 - **Checkatrade** has no reply API and doesn't allow bots in its app, so the owner taps "I'm interested" themselves. The platform makes that take seconds.
 - **Booking systems** (Halaxy, Cliniko…) are linked to, not connected: the customer books on the business's own page, and the platform doesn't see those bookings yet.
 - **Try it uses real AI calls,** so it needs Claude API credit. It is limited to owners and 30 tries a day per business.
@@ -331,7 +336,7 @@ The tests wipe that database. They run whole journeys against real Postgres, wit
 ### Now: get the first business live
 1. Finish Google OAuth consent for Test Business. Add Claude API credit and press **Test** on the Keys page.
 2. Switch on Test Business and send a real test enquiry end to end.
-3. Set up WhatsApp (platform number and approval template). Optionally, set up the Mac text relay.
+3. Test WhatsApp with Meta's test numbers (`docs/whatsapp-setup.md`, Part A), and apply to be a Meta Tech Provider now (Part B), as it takes weeks. Optionally, set up the Mac text relay.
 4. Tune the Checkatrade reader on a real lead email.
 5. **Onboard The Health Nutritionist** (practitioner pack, likely the Halaxy booking link).
 

@@ -43,5 +43,6 @@ export async function tenantWaSender(db: Db): Promise<WaSender | undefined> {
   return { phoneNumberId: conn.external_id, accessToken };
 }
 
-/** The platform's own WhatsApp number, for messages to business owners. */
-export const platformWaSender = (): WaSender => ({ phoneNumberId: env.platformWaPhoneNumberId, accessToken: env.platformWaToken });
+/** The platform's own WhatsApp number, for messages to business owners. Undefined until it's set up. */
+export const platformWaSender = (): WaSender | undefined =>
+  env.hasPlatformWa ? { phoneNumberId: env.platformWaPhoneNumberId, accessToken: env.platformWaToken } : undefined;

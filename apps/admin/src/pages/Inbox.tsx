@@ -53,6 +53,7 @@ export function Conversation() {
       {data.lead && <CheckatradeLead lead={data.lead} contact={data.contact} convId={data.conversation.id} bizId={id} onChange={reload} />}
       <Quote conv={data.conversation} bizId={id} onChange={reload} />
       <JobDone conv={data.conversation} bizId={id} onChange={reload} />
+      <Personal conv={data.conversation} bizId={id} onChange={reload} />
       {data.drafts.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} leadPending={data.lead?.decision === "pending" && d.kind === "reply"} />)}
     </Page>
   );
@@ -129,6 +130,26 @@ function JobDone({ conv, bizId, onChange }: { conv: any; bizId: string; onChange
         </div>
       )}
     </Card>
+  );
+}
+
+/** A personal chat on the owner's one WhatsApp number (a friend, family): ignore the person, and forget what they said. */
+function Personal({ conv, bizId, onChange }: { conv: any; bizId: string; onChange: () => void }) {
+  const { busy, error, run } = useAction();
+  if (conv.ignored_at) return (
+    <Card title="Ignored">
+      <p className="muted">You chose to ignore this person {when(conv.ignored_at)}. Their messages aren't kept or answered.</p>
+      <ErrorNote message={error} />
+      <div className="buttons"><button disabled={busy} onClick={() => run(async () => { await post(`/businesses/${bizId}/conversations/${conv.id}/unignore`); onChange(); })}>Stop ignoring</button></div>
+    </Card>
+  );
+  return (
+    <details className="card quiet">
+      <summary>Not a customer?</summary>
+      <p className="muted">If this is a friend or family member, ignore them. Anything waiting is dropped, what they said is deleted here, and new messages from them won't be kept or answered. Your chat in WhatsApp isn't touched.</p>
+      <ErrorNote message={error} />
+      <div className="buttons"><button className="danger" disabled={busy} onClick={() => confirm("Ignore this person? What they said will be deleted here.") && run(async () => { await post(`/businesses/${bizId}/conversations/${conv.id}/ignore`); onChange(); })}>Ignore this person</button></div>
+    </details>
   );
 }
 

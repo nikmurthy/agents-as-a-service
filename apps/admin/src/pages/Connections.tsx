@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { get, post } from "../api";
+import { get, post, put } from "../api";
 import { useBiz } from "../ctx";
 import { Card, Empty, ErrorNote, Field, Loading, Page, Status, useAction, useLoad, when } from "../ui";
 
@@ -21,7 +21,7 @@ export function Connections() {
         {live.map((c: any) => (
           <div key={c.id} className="row stack">
             <div className="row-top">
-              <div><strong>{KIND[c.kind] ?? c.kind}</strong><div className="muted">{c.connectedAs ?? c.label}</div></div>
+              <div><strong>{c.kind === "whatsapp" && c.coexistence ? "WhatsApp Business number (shared with your app)" : KIND[c.kind] ?? c.kind}</strong><div className="muted">{c.kind === "whatsapp" && c.label ? c.label : c.connectedAs ?? c.label}</div></div>
               <div className="row-meta">
                 <Status value={c.status} />
                 {canManage && <button disabled={act.busy} onClick={() => confirm("Disconnect this? Messages from it will stop arriving.") && act.run(async () => { await post(`/businesses/${id}/connections/${c.id}/disable`); reload(); })}>Disconnect</button>}
@@ -38,6 +38,8 @@ export function Connections() {
           <button disabled={act.busy} onClick={() => act.run(async () => setGoogle((await get(`/businesses/${id}/connections/google-link`)).url))}>Make a connect link</button>
           {google && <p><code className="wrap">{google}</code> <button type="button" onClick={() => navigator.clipboard.writeText(google)}>Copy</button></p>}
         </Card>
+        <WhatsAppBusiness id={id} ready={data.whatsappSignupReady} />
+        {live.some((c: any) => c.kind === "whatsapp" && c.coexistence) && <WhoToAnswer id={id} value={data.whatsappPeople} onDone={reload} />}
         <WhatsApp id={id} onDone={reload} />
         <Card title="Add a link for a website form, Checkatrade or texts">
           <div className="buttons">
@@ -53,6 +55,46 @@ export function Connections() {
   );
 }
 
+/** The sole trader's one number: the one they already use in the WhatsApp Business app (Meta Embedded Signup). */
+function WhatsAppBusiness({ id, ready }: { id: string; ready: boolean }) {
+  const [link, setLink] = useState<string>();
+  const { busy, error, run } = useAction();
+  return (
+    <Card title="Your WhatsApp Business number">
+      <p>Use the number customers already message. You keep using the WhatsApp Business app exactly as now: you'll see every chat, and replies you approve are sent from your number.</p>
+      <ul className="muted small">
+        <li>People saved in your phone are left alone, unless they're already customers.</li>
+        <li>If you answer a customer yourself in the app, the reply waiting here is dropped, so nobody gets two.</li>
+        <li>Approval requests come from our number as a separate chat, or you approve in this app.</li>
+      </ul>
+      {ready ? (<>
+        <p className="muted">Make a one-time link for the owner. They sign in to Facebook in Meta's own window; we never see their password.</p>
+        <button disabled={busy} onClick={() => run(async () => setLink((await get(`/businesses/${id}/connections/whatsapp-link`)).url))}>Make a connect link</button>
+        {link && <p><code className="wrap">{link}</code> <button type="button" onClick={() => navigator.clipboard.writeText(link)}>Copy</button></p>}
+      </>) : <p className="note">Waiting for Meta to approve the platform. Until then, test with a Meta test number below.</p>}
+      <ErrorNote message={error} />
+    </Card>
+  );
+}
+
+function WhoToAnswer({ id, value, onDone }: { id: string; value: string; onDone: () => void }) {
+  const { busy, error, run } = useAction();
+  const set = (people: string) => run(async () => { await put(`/businesses/${id}/whatsapp-people`, { people }); onDone(); });
+  return (
+    <Card title="Who gets an answer on WhatsApp">
+      <fieldset disabled={busy}>
+        <legend className="sr-only">Who gets an answer on WhatsApp</legend>
+        <label className="choice"><input type="radio" name="people" checked={value !== "everyone"} onChange={() => set("new_and_customers")} />
+          <span><strong>New people and customers</strong><br /><span className="muted small">People saved in your phone are left alone, unless they're already customers. Best if this is also your personal number.</span></span></label>
+        <label className="choice"><input type="radio" name="people" checked={value === "everyone"} onChange={() => set("everyone")} />
+          <span><strong>Everyone</strong><br /><span className="muted small">For a number used only for work.</span></span></label>
+      </fieldset>
+      <p className="muted small">Personal chats that slip through are set aside by the "Read and sort" step, and you can tap "Not a customer? Ignore" on any reply.</p>
+      <ErrorNote message={error} />
+    </Card>
+  );
+}
+
 function WhatsApp({ id, onDone }: { id: string; onDone: () => void }) {
   const [phoneNumberId, setP] = useState("");
   const [accessToken, setT] = useState("");
@@ -62,7 +104,7 @@ function WhatsApp({ id, onDone }: { id: string; onDone: () => void }) {
     run(async () => { await post(`/businesses/${id}/connections/whatsapp`, { phoneNumberId, accessToken }); setP(""); setT(""); onDone(); }, "WhatsApp connected.");
   };
   return (
-    <Card title="WhatsApp number">
+    <Card title="Connect a number by its ID (Meta test numbers)">
       <form onSubmit={submit}>
         <Field label="Phone number ID" hint="From the WhatsApp section in Meta."><input required inputMode="numeric" value={phoneNumberId} onChange={(e) => setP(e.target.value)} /></Field>
         <Field label="Access token" hint="Stored encrypted. It can't be viewed again once saved; paste a new one to replace it."><input required type="password" autoComplete="off" value={accessToken} onChange={(e) => setT(e.target.value)} /></Field>

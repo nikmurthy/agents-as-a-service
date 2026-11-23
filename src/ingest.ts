@@ -16,6 +16,8 @@ export async function ingest(tenantId: string, m: InboundMessage): Promise<strin
     }
     const tenant = await one<{ pack: string }>(db, "select pack from tenants where id = $1", [tenantId]);
     const contactId = await matchOrCreateContact(db, m);
+    // "Ignore this person" (e.g. a friend messaging the owner's one WhatsApp number): nothing is stored or answered.
+    if (await one(db, "select 1 from contacts where id = $1 and ignored_at is not null", [contactId])) return undefined;
     const conversationId = await openConversation(db, contactId, m);
     const tags = tagData(m, tenant!.pack);
     const row = await one<{ id: string }>(db,

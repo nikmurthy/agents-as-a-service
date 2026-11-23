@@ -8,7 +8,8 @@ export const adminApp = new Hono();
 adminApp.use("*", async (c, next) => {
   await next();
   const supabase = env.supabaseUrl ? ` ${new URL(env.supabaseUrl).origin}` : "";
-  c.header("Content-Security-Policy",
+  // The WhatsApp connect page sets its own policy: it alone may load Meta's signup script.
+  if (c.req.path !== "/connect/whatsapp") c.header("Content-Security-Policy",
     `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'${supabase}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
   c.header("X-Content-Type-Options", "nosniff");
   c.header("Referrer-Policy", "no-referrer");

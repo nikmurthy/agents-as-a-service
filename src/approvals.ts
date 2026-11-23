@@ -53,14 +53,14 @@ export async function sendApproval(tenantId: string, draftId: string): Promise<v
       if (windowOpen) {
         const body = `${d.business}\n\n${head}${advice}\n\n${draftBlock}`;
         if (body.length <= 1024) {
-          sent = await clients.whatsapp.sendButtons(platformWaSender(), p.whatsapp_phone, body, buttons);
+          sent = await clients.whatsapp.sendButtons(platformWaSender()!, p.whatsapp_phone, body, buttons);
         } else {
-          await clients.whatsapp.sendText(platformWaSender(), p.whatsapp_phone, body);
-          sent = await clients.whatsapp.sendButtons(platformWaSender(), p.whatsapp_phone, `Approve this reply to ${first}?`, buttons);
+          await clients.whatsapp.sendText(platformWaSender()!, p.whatsapp_phone, body);
+          sent = await clients.whatsapp.sendButtons(platformWaSender()!, p.whatsapp_phone, `Approve this reply to ${first}?`, buttons);
         }
       } else {
         // Template body (set up once in Meta): "{{1}}: new message from {{2}}. Draft reply: {{3}}" with buttons Approve / Edit / Reject.
-        sent = await clients.whatsapp.sendTemplate(platformWaSender(), p.whatsapp_phone, env.approvalTemplateName, env.approvalTemplateLang,
+        sent = await clients.whatsapp.sendTemplate(platformWaSender()!, p.whatsapp_phone, env.approvalTemplateName, env.approvalTemplateLang,
           [d.business, `${first} (${d.kind === "chase" ? "quote follow-up" : d.kind === "feedback" ? "feedback request" : CHANNEL_LABEL[d.channel] ?? "message"})${d.needs_attention ? " ⚠️ " + d.attention_reason : ""}${isLead ? advice.replace(/\n+/g, " ") + ". Approve = I'm interested, Reject = Not for me" : ""}`, clip(d.body, 700)],
           buttons.map((b) => b.id));
       }
@@ -74,7 +74,7 @@ export async function sendApproval(tenantId: string, draftId: string): Promise<v
 export async function handleOwnerMessage(w: WaInbound): Promise<void> {
   const members = await withAdmin((db) => many<{ id: string; tenant_id: string; name: string }>(db,
     "select id, tenant_id, name from tenant_members where whatsapp_phone = $1 and is_approver", [w.from]));
-  const reply = (text: string) => clients.whatsapp.sendText(platformWaSender(), w.from, text);
+  const reply = (text: string) => clients.whatsapp.sendText(platformWaSender()!, w.from, text);
   if (!members.length) return; // not someone we know: ignore
   await withAdmin((db) => db.query("update tenant_members set approver_last_inbound_at = now() where whatsapp_phone = $1", [w.from]));
 
@@ -139,7 +139,7 @@ const memberActor = (memberId: string): Actor => ({ memberId, audit: `member:${m
 async function tellAutomation(tenantId: string, to: string, a: { text: string; offer?: string } | undefined) {
   if (!a) return;
   if (a.offer) await sendOffer(tenantId, a.offer, to, a.text);
-  else await clients.whatsapp.sendText(platformWaSender(), to, a.text);
+  else await clients.whatsapp.sendText(platformWaSender()!, to, a.text);
 }
 
 type Outcome = { text?: string; automation?: { text: string; offer?: string } };

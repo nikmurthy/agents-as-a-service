@@ -285,3 +285,10 @@ h3.feed-day { margin: 1rem 0 .4rem; font-size: .95rem; color: var(--text); }
 .ev.customer .ev-icon { background: var(--good-bg); color: var(--good); }
 .ev-body { flex: 1; min-width: 0; } .ev-time { font-weight: 700; font-variant-numeric: tabular-nums; margin-right: .25rem; }
 .ev-links { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .92rem; } .ev-links:empty { display: none; }
+
+/* "Not a customer?" on a conversation: tucked away, but a full-size tap target. */
+details.card summary { min-height: 48px; display: flex; align-items: center; font-size: 1rem; }
+.choice { display: flex; gap: .75rem; align-items: flex-start; min-height: 48px; padding: .5rem 0; }
+.choice input { width: 1.4rem; height: 1.4rem; margin-top: .2rem; flex: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+fieldset { border: 0; padding: 0; margin: 0; }

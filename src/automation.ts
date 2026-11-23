@@ -123,7 +123,7 @@ export async function setState(db: Db, tenantId: string, category: string, state
 
 /** Sends the offer with Yes / Keep asking buttons. Only when the person's WhatsApp window is open (they just pressed a button). */
 export async function sendOffer(tenantId: string, category: string, to: string, text: string) {
-  await clients.whatsapp.sendButtons(platformWaSender(), to, text, [
+  await clients.whatsapp.sendButtons(platformWaSender()!, to, text, [
     { id: `au:y:${tenantId}:${category}`, title: "Yes, automate" },
     { id: `au:n:${tenantId}:${category}`, title: "Keep asking me" },
   ]);
@@ -151,6 +151,6 @@ export async function notifyAutoSent(db: Db, customer: string, route: string, ca
   const label = category && category in CATEGORIES ? CATEGORIES[category as Category].label.toLowerCase() : "reply";
   const first = (customer || "the customer").split(/\s+/)[0];
   for (const p of await approvers(db)) {
-    await clients.whatsapp.sendText(platformWaSender(), p.whatsapp_phone, `Sent to ${first} automatically by ${route} (${label}):\n\n${body}`);
+    await clients.whatsapp.sendText(platformWaSender()!, p.whatsapp_phone, `Sent to ${first} automatically by ${route} (${label}):\n\n${body}`);
   }
 }
