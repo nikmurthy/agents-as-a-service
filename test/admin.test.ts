@@ -28,6 +28,7 @@ const { app } = await import("../src/app.js");
 const { taskList } = await import("../src/jobs/tasks.js");
 const { releaseQueue } = await import("../src/jobs/queue.js");
 const { tenantSettingsSchema } = await import("../src/settings-schema.js");
+const { sendWeeklySummaries, weeklyText } = await import("../src/workflows/weekly-summary.js");
 const { runOnce, Logger } = await import("graphile-worker");
 const { fakeGoogle, fakeWhatsApp } = await import("./fakes.js");
 
@@ -294,6 +295,12 @@ test("the setup checklist shows what a business still needs, scoped to that busi
   assert.equal(step("claude").done, false);
   assert.equal(step("approver").done, true);
   assert.equal(r.json.complete, false);
+  // A task list: switching on can't start until the required steps are done; optional ones don't block it.
+  assert.equal(step("claude").status, "todo");
+  assert.equal(step("approver").status, "done");
+  assert.equal(step("active").status, step("active").done ? "done" : "blocked");
+  assert.equal(step("reply").optional, true);
+  assert.ok(r.json.needs.includes("A reply or two you've sent"), "what you'll need, from the steps still to do");
   assert.equal((await api("ownerA", "GET", `/businesses/${B}/setup`)).status, 404);
 });
 
@@ -383,6 +390,84 @@ test("reply style: owners pick a tone and paste examples; contact details are re
   assert.ok(logged.length >= 2);
   assert.ok(logged.every((l) => !l.d.includes("lovely to hear from you")), "example text stays out of the audit log");
   assert.equal((await api("ownerB", "PUT", `/businesses/${A}/reply-style`, body)).status, 404);
+});
+
+test("replies waiting, one at a time: each with what the customer said, for this business only", async () => {
+  const { draftId } = await makeDraft(A, "Hi Jo, happy to quote. Could you send a photo?");
+  const w = await api("staffA", "GET", `/businesses/${A}/waiting`);
+  assert.equal(w.status, 200);
+  const d = w.json.waiting.find((x: any) => x.id === draftId);
+  assert.ok(d, "the new reply is waiting");
+  assert.equal(d.name, "Jo Bloggs");
+  assert.equal(d.said.body, "Can you quote for a kitchen floor?");
+  assert.equal(d.review_pass, true);
+  assert.equal((await api("ownerB", "GET", `/businesses/${A}/waiting`)).status, 404);
+  assert.ok(!(await api("ownerB", "GET", `/businesses/${B}/waiting`)).json.waiting.some((x: any) => x.id === draftId));
+  assert.equal((await api("ownerA", "POST", `/businesses/${A}/drafts/${draftId}/approve`)).status, 200);
+  assert.ok(!(await api("ownerA", "GET", `/businesses/${A}/waiting`)).json.waiting.some((x: any) => x.id === draftId), "decided replies leave the queue");
+});
+
+test("what happened: plain sentences saying who did what and why, with no message text", async () => {
+  const feed = await api("staffA", "GET", `/businesses/${A}/feed`);
+  assert.equal(feed.status, 200);
+  assert.ok(feed.json.items.some((e: any) => /^Mark approved the reply to Jo\.$/.test(e.text) && e.who === "you"), "a decision, by name");
+  assert.ok(!JSON.stringify(feed.json).includes("Can you quote"), "never the customer's words");
+  assert.equal((await api("ownerB", "GET", `/businesses/${A}/feed`)).status, 404);
+
+  // An automatic send says why, and offers to switch that kind back to asking.
+  const { draftId } = await makeDraft(A, "Hi Jo, yes we cover your area.");
+  await withTenant(A, async (db) => {
+    await db.query("update drafts set status = 'sent', auto_sent = true, category = 'answer_question', decided_at = now() where id = $1", [draftId]);
+    await db.query("insert into automations (tenant_id, category, state) values (app_current_tenant(), 'answer_question', 'on') on conflict (tenant_id, category) do update set state = 'on'");
+    await db.query("insert into audit_log (tenant_id, actor, action, entity, entity_id) values (app_current_tenant(), 'system', 'reply.sent', 'draft', $1)", [draftId]);
+  });
+  const auto = (await api("ownerA", "GET", `/businesses/${A}/feed`)).json.items.find((e: any) => e.automatic);
+  assert.match(auto.text, /^Sent the reply to Jo automatically by WhatsApp\.$/);
+  assert.match(auto.why, /You said yes to sending "Answering questions" replies automatically/);
+  assert.equal(auto.automatic, "answer_question");
+  await api("ownerA", "PUT", `/businesses/${A}/automations/answer_question`, { on: false });
+  assert.ok(!(await api("ownerA", "GET", `/businesses/${A}/feed`)).json.items.some((e: any) => e.automatic), "no switch once it's back to asking");
+});
+
+test("try it: a pretend message goes through the flow and nothing is saved, held or sent", async () => {
+  const count = () => withTenant(A, (db) => one<any>(db,
+    "select (select count(*) from drafts) d, (select count(*) from runs) r, (select count(*) from holds) h, (select count(*) from messages) m, (select count(*) from outbox) o, (select count(*) from contacts) c"));
+  const before = await count();
+  const sentBefore = wa.sent.length;
+  const r = await api("ownerA", "POST", `/businesses/${A}/flows/try`, { message: "Hi, could you quote for laminate in our lounge?", channel: "email" });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json.steps.map((s: any) => s.key), ["triage", "booking", "reply", "approve"]);
+  assert.ok(r.json.reply.length > 10, "the reply the customer would get");
+  assert.deepEqual(await count(), before, "nothing written");
+  assert.equal(wa.sent.length, sentBefore, "nothing sent");
+  const complaint = await api("ownerA", "POST", `/businesses/${A}/flows/try`, { message: "I'm not happy, there are gaps opening in the floor." });
+  assert.equal(complaint.json.steps.find((s: any) => s.key === "approve").flag, true, "complaints always come to you");
+  assert.equal((await api("staffA", "POST", `/businesses/${A}/flows/try`, { message: "Hello there" })).status, 403);
+  assert.equal((await api("ownerB", "POST", `/businesses/${A}/flows/try`, { message: "Hello there" })).status, 404);
+  assert.equal((await api("ownerA", "POST", `/businesses/${A}/flows/try`, { message: "" })).status, 400);
+});
+
+test("this week: counts on Overview, and a Friday WhatsApp summary only for owners who ask", async () => {
+  const o = (await api("staffA", "GET", `/businesses/${A}`)).json;
+  assert.equal(typeof o.week.repliesSent, "number");
+  assert.equal(o.weeklySummary, false);
+  assert.equal(weeklyText("X", { messagesIn: 0, repliesSent: 0, avgMinutesToReply: null, booked: 0, quotesChased: 0, feedbackAsked: 0, sentAutomatically: 0 }), undefined, "no empty summaries");
+  assert.equal((await api("staffA", "PUT", `/businesses/${A}/weekly-summary`, { on: true })).status, 403);
+
+  let i = wa.sent.length;
+  await sendWeeklySummaries();
+  assert.ok(!wa.sent.slice(i).some((m) => /your week/.test(m.text ?? "")), "off by default");
+
+  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/weekly-summary`, { on: true })).status, 200);
+  assert.equal((await api("ownerA", "GET", `/businesses/${A}`)).json.weeklySummary, true);
+  i = wa.sent.length;
+  await sendWeeklySummaries();
+  const msg = wa.sent.slice(i).find((m) => /your week/.test(m.text ?? ""));
+  assert.ok(msg, "sent to the owner");
+  assert.equal(msg!.to, "+447700900001");
+  assert.match(msg!.text!, /repl(y|ies) sent/);
+  assert.ok(!wa.sent.slice(i).some((m) => m.to === "+447700900002"), "not to another business");
+  await api("ownerA", "PUT", `/businesses/${A}/weekly-summary`, { on: false });
 });
 
 test("people: the last owner can't be removed or demoted; approvers need a WhatsApp number", async () => {

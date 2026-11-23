@@ -1,10 +1,11 @@
 :root {
-  --bg: #f6f7f9; --card: #fff; --text: #1c2330; --muted: #667085; --line: #e3e6eb;
+  --bg: #f6f7f9; --card: #fff; --text: #1c2330; --muted: #566072; --line: #e3e6eb; --info: #1f4fd6; --info-bg: #e8efff;
   --brand: #1f5eff; --brand-text: #fff; --good: #137a43; --good-bg: #e3f5ea; --warn: #8a5a00; --warn-bg: #fff2d6;
   --bad: #b42318; --bad-bg: #fde8e6; --radius: 10px;
 }
 * { box-sizing: border-box; }
-body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+/* Atkinson Hyperlegible: made by the Braille Institute for low-vision readers. Bundled with the app (no outside font service). */
+body { margin: 0; font: 17px/1.55 "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
 h1 { font-size: 1.5rem; margin: 0 0 .5rem; } h2 { font-size: 1.05rem; margin: 0 0 .75rem; }
 a { color: var(--brand); text-decoration: none; }
 code { background: #eef0f4; padding: .1rem .35rem; border-radius: 4px; font-size: .9em; }
@@ -56,9 +57,9 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; } fieldset:disabled i
 .check { display: inline-flex; gap: .4rem; align-items: center; margin-right: .75rem; } .days { margin-bottom: .75rem; }
 .grid { display: grid; gap: 0 1rem; } .grid.two { grid-template-columns: 1fr; } .grid.three { grid-template-columns: 1fr; align-items: end; }
 @media (min-width: 640px) { .grid.two { grid-template-columns: 1fr 1fr; } .grid.three { grid-template-columns: 2fr 1fr 1.2fr auto; } }
-.switch input { width: 1.4rem; height: 1.4rem; }
+.switch input { width: 1.75rem; height: 1.75rem; }
 
-button { font: inherit; padding: .5rem .9rem; border-radius: 8px; border: 1px solid #c9ced8; background: #fff; color: var(--text); cursor: pointer; min-height: 2.5rem; }
+button { font: inherit; padding: .5rem .9rem; border-radius: 8px; border: 1px solid #c9ced8; background: #fff; color: var(--text); cursor: pointer; min-height: 48px; }
 button.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-text); }
 button.danger { color: var(--bad); border-color: #f0b8b3; } button:disabled { opacity: .55; cursor: default; }
 .buttons { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
@@ -194,3 +195,93 @@ button.flow-step.selected { outline: 2px solid var(--brand); outline-offset: 0; 
 .toggle { padding: .25rem 0 .75rem; }
 ul.always li { color: var(--muted); font-size: .9rem; }
 .choice .example { color: var(--text); font-size: .88rem; font-style: italic; background: #fff; border-left: 3px solid var(--line); padding: .2rem .5rem; margin-top: .25rem; }
+
+/* ---------- Making it obvious (design ideas 1-9) ---------- */
+.icon { flex: none; vertical-align: -0.2em; }
+button .icon { margin-right: .25rem; }
+input, select { min-height: 48px; }
+input[type=checkbox], input[type=radio] { min-height: 0; }
+.pill.info { background: var(--info-bg); color: var(--info); }
+button.link { border: 0; background: none; color: var(--brand); padding: .25rem 0; min-height: 0; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+h2.section { font-size: 1rem; color: var(--muted); margin: 1.25rem 0 .5rem; }
+.tabs a { padding: .7rem .8rem; }
+
+/* 7. One hand, outdoors: on a phone, decision buttons sit at the bottom of the screen within thumb reach. */
+@media (max-width: 719px) {
+  .dock { position: sticky; bottom: 0; z-index: 4; background: var(--card); margin: .75rem -1rem -1rem; padding: .6rem 1rem calc(.6rem + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line); box-shadow: 0 -4px 12px rgb(0 0 0 / 6%); display: flex; gap: .5rem; }
+  .dock > button { flex: 1; min-height: 52px; font-weight: 700; }
+}
+.dock { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
+
+/* 2. Replies waiting, one at a time */
+.queue { background: var(--card); border: 2px solid var(--brand); border-radius: 14px; padding: 1rem; margin-bottom: 1rem; }
+.queue.empty-queue { border-color: var(--line); }
+.queue-head { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; margin-bottom: .5rem; }
+.queue-head h2 { margin: 0; font-size: 1.2rem; }
+.queue .count { font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.said { background: #f3f4f7; border-radius: 10px; padding: .65rem .8rem; margin-bottom: .6rem; }
+.said p { margin: .25rem 0 0; white-space: pre-wrap; max-height: 12rem; overflow: auto; }
+.ours { border: 1px solid var(--line); border-radius: 10px; padding: .65rem .8rem; }
+.ours.closer { border-color: #f0b8b3; }
+.ours-head { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-bottom: .4rem; }
+.ours .draft-body { margin: 0; }
+.queue-foot { display: flex; gap: 1.25rem; flex-wrap: wrap; align-items: center; margin-top: .6rem; font-size: .95rem; }
+.queue .dock { margin-left: 0; margin-right: 0; }
+@media (max-width: 719px) { .queue .dock { margin: .75rem -1rem 0; } }
+
+/* 9. This week */
+dl.week { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .5rem 1rem; margin: 0 0 .5rem; }
+dl.week div { display: flex; flex-direction: column-reverse; }
+dl.week dt { color: var(--muted); font-size: .9rem; } dl.week dd { margin: 0; font-size: 1.7rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+
+/* 6. Setup task list */
+ul.needs { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 0 !important; margin: .25rem 0 .9rem !important; }
+ul.needs li { background: var(--info-bg); color: var(--info); border-radius: 999px; padding: .25rem .75rem; font-size: .92rem; margin: 0 !important; }
+.tasklist { list-style: none; padding: 0 !important; margin: 0; }
+.tasklist li { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; padding: .65rem 0; border-bottom: 1px solid var(--line); margin: 0 !important; }
+.tasklist li:last-child { border-bottom: 0; } .tasklist li > div { flex: 1; min-width: 0; }
+.tasklist li.done strong { color: var(--muted); font-weight: 400; }
+.tasklist .pill { white-space: nowrap; }
+
+/* 1. Flows: picture blocks and the flow as a sentence */
+.flow-tools { display: flex; justify-content: space-between; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+button.flow-step .icon { color: var(--brand); }
+@media (min-width: 720px) { button.flow-step .icon { margin-bottom: .15rem; } }
+@media (max-width: 719px) { button.flow-step { align-items: center; } button.flow-step span { flex-basis: 100%; padding-left: 1.9rem; } }
+button.flow-step.lit { outline: 3px solid var(--good); background: var(--good-bg); }
+@media (prefers-reduced-motion: no-preference) { button.flow-step { transition: background .3s, outline-color .3s; } }
+.sentence { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .8rem 1rem; line-height: 1.9; margin: 0 0 1rem; max-width: 75ch; }
+a.phrase { color: var(--text); text-decoration: underline; text-decoration-color: var(--brand); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+a.phrase:hover { color: var(--brand); }
+.toggle > span { flex: 1 1 12rem; }
+
+/* 3. Try it */
+.chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .6rem; }
+button.chip { border-radius: 999px; min-height: 40px; padding: .3rem .9rem; } button.chip.on { border-color: var(--brand); background: var(--info-bg); color: var(--info); }
+ol.try-steps { list-style: none; padding: 0 !important; margin: .75rem 0; display: grid; gap: .4rem; }
+ol.try-steps li { display: flex; gap: .6rem; align-items: flex-start; background: var(--good-bg); border-radius: 8px; padding: .5rem .7rem; margin: 0 !important; }
+ol.try-steps li.flag { background: var(--warn-bg); } ol.try-steps .tick { font-weight: 700; width: 1rem; text-align: center; }
+@media (prefers-reduced-motion: no-preference) { ol.try-steps li { animation: rise .35s ease-out; } @keyframes rise { from { opacity: .2; transform: translateY(4px); } } }
+
+/* 4. The trust ladder */
+.ladders { display: grid; gap: .6rem; margin-bottom: 1rem; }
+.ladder-card { border: 1px solid var(--line); border-radius: 10px; padding: .7rem .8rem; display: grid; gap: .45rem; }
+.ladder-card.locked { background: #f8f9fb; }
+.ladder-top { display: flex; justify-content: space-between; gap: .75rem; align-items: flex-start; flex-wrap: wrap; }
+.ladder-top > div { flex: 1 1 14rem; } .ladder-top .switch { display: flex; align-items: center; gap: .4rem; }
+ol.ladder { list-style: none; padding: 0 !important; margin: 0 !important; display: grid; grid-template-columns: repeat(3, 1fr); gap: .3rem; }
+ol.ladder li { margin: 0 !important; text-align: center; font-size: .85rem; padding: .35rem .2rem; border-radius: 6px; background: #eef0f4; color: var(--muted); }
+ol.ladder li.past { background: var(--good-bg); color: var(--good); } ol.ladder li.here { background: var(--brand); color: #fff; font-weight: 700; }
+.track { height: 10px; background: #eef0f4; border-radius: 999px; overflow: hidden; }
+.track i { display: block; height: 100%; background: var(--good); border-radius: 999px; }
+
+/* 5. What happened, in plain words */
+.feed { display: grid; gap: .1rem; }
+h3.feed-day { margin: 1rem 0 .4rem; font-size: .95rem; color: var(--text); }
+.ev { display: flex; gap: .7rem; padding: .6rem .75rem; background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin-bottom: .35rem; }
+.ev-icon { flex: none; width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center; background: #eef0f4; color: var(--muted); }
+.ev.you .ev-icon { background: var(--warn-bg); color: var(--warn); } .ev.assistant .ev-icon { background: var(--info-bg); color: var(--info); }
+.ev.customer .ev-icon { background: var(--good-bg); color: var(--good); }
+.ev-body { flex: 1; min-width: 0; } .ev-time { font-weight: 700; font-variant-numeric: tabular-nums; margin-right: .25rem; }
+.ev-links { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .92rem; } .ev-links:empty { display: none; }

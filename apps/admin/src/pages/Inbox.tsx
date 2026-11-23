@@ -13,7 +13,7 @@ export function Inbox() {
   const { data, error, loading } = useLoad(() => get(`/businesses/${id}/conversations${waiting ? "?waiting=1" : ""}`), [id, waiting]);
   return (
     <Page title="Inbox" actions={
-      <label className="check"><input type="checkbox" checked={waiting} onChange={(e) => setParams(e.target.checked ? { waiting: "1" } : {})} /> Only waiting for approval</label>}>
+      <label className="check"><input type="checkbox" checked={waiting} onChange={(e) => setParams(e.target.checked ? { waiting: "1" } : {})} /> Only replies waiting for you</label>}>
       <ErrorNote message={error} />
       {loading && !data && <Loading />}
       {data && !data.conversations.length && <Empty>{waiting ? "No replies are waiting." : "No conversations yet."}</Empty>}
@@ -22,8 +22,8 @@ export function Inbox() {
           <Link key={c.id} to={`/b/${id}/inbox/${c.id}`} className="row">
             <div><strong>{c.name ?? "Unknown"}</strong><div className="muted clip">{c.preview}</div></div>
             <div className="row-meta">
-              {c.needs_attention && <span className="pill bad">check</span>}
-              {c.drafts_waiting > 0 && <span className="pill warn">reply waiting</span>}
+              {c.needs_attention && <span className="pill bad">Have a closer look</span>}
+              {c.drafts_waiting > 0 && <span className="pill warn">Reply waiting for you</span>}
               <span className="muted">{when(c.last_activity_at)}</span>
             </div>
           </Link>
@@ -149,12 +149,14 @@ function Draft({ draft, bizId, onChange, leadPending }: { draft: any; bizId: str
   });
   return (
     <Card title={`${draft.kind === "chase" ? "Quote follow-up" : draft.kind === "feedback" ? "Feedback request" : "Reply"} by ${ROUTE[draft.reply_route] ?? draft.reply_route}`}>
-      <div className="row-meta"><Status value={draft.status} />{draft.edited && <span className="pill muted">edited</span>}{draft.auto_sent && <span className="pill good">sent automatically</span>}<span className="muted">{when(draft.created_at)}</span></div>
+      <div className="row-meta"><Status value={draft.status} />
+        {pending && (draft.needs_attention || draft.review?.pass === false ? <span className="pill bad">Have a closer look</span> : <span className="pill good">Looks good</span>)}
+        {draft.edited && <span className="pill muted">you changed it</span>}{draft.auto_sent && <span className="pill good">sent automatically</span>}<span className="muted">{when(draft.created_at)}</span></div>
       {draft.needs_attention ? <p className="note error">{draft.attention_reason}</p> : draft.attention_reason && pending && <p className="note">🔎 {draft.attention_reason}</p>}
       {editing ? <textarea rows={7} value={text} onChange={(e) => setText(e.target.value)} aria-label="Reply wording" /> : <p className="draft-body">{draft.body}</p>}
       <ErrorNote message={error} />
       {pending && (
-        <div className="buttons">
+        <div className="buttons dock">
           {editing ? (<>
             <button className="primary" disabled={busy || !text.trim()} onClick={() => act("edit", { body: text })}>Send my version</button>
             <button disabled={busy} onClick={() => { setEditing(false); setText(draft.body); }}>Cancel</button>

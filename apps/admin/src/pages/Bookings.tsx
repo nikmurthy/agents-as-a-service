@@ -12,7 +12,7 @@ export function Bookings() {
   if (!data) return <Loading />;
   return (
     <Page title="Bookings">
-      <p className="muted">"Held" times are offered to a customer and kept free for a while. Cancelling frees the time in your calendar.</p>
+      <p className="muted">"Pencilled in" times have been offered to a customer and are kept free for them for a while. "Booked" means they picked it. Releasing a time frees it in your calendar.</p>
       <ErrorNote message={act.error} />
       {!data.bookings.length && <Empty>No bookings yet.</Empty>}
       <div className="list">

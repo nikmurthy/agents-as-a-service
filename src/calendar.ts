@@ -5,6 +5,7 @@ import { clients } from "./integrations/index.js";
 import { getConnection, googleToken, type Connection } from "./connections.js";
 import { addDaysLocal, isoWeekday, localToUtc, utcToLocal } from "./time.js";
 import { env } from "./env.js";
+import { audit } from "./audit.js";
 
 // Availability = working hours, minus busy time in the business's Google Calendar, minus our own open holds.
 // Holds are written to Google as tentative events too, so the owner sees them in their diary.
@@ -89,6 +90,7 @@ export async function createHold(
     extendedProperties: { private: { holdId: row!.id } },
   });
   await db.query("update holds set calendar_event_id = $2 where id = $1", [row!.id, ev.id]);
+  await audit(db, { tenantId: tenant.id, actor: "system", action: "booking.held", entity: "hold", entityId: row!.id });
   return row!.id;
 }
 
@@ -103,6 +105,7 @@ export async function confirmHold(db: Db, holdId: string, contactName?: string):
     });
   }
   await db.query("update holds set status = 'confirmed', expires_at = null where id = $1", [holdId]);
+  await audit(db, { tenantId: hold.tenant_id, actor: "system", action: "booking.confirmed", entity: "hold", entityId: holdId });
   // Release the other times we offered this customer.
   const others = await many(db, "select id from holds where conversation_id = $1 and status = 'held' and id <> $2", [hold.conversation_id, holdId]);
   for (const o of others) await releaseHold(db, o.id, "released");
