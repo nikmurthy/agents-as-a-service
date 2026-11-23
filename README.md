@@ -1,45 +1,149 @@
-# Agent platform
+# Agents as a service
 
-The base for onboarding businesses and running agent use cases for them.
+A team of AI helpers for small businesses, each one doing a dull job the owner would otherwise do on their phone at 10pm.
 
-**Live at launch:** *Answer enquiries* and *Book appointments*, across Gmail, WhatsApp, website forms and Checkatrade, with every reply approved by the business owner on WhatsApp.
+## The aim
+
+Small businesses lose work because they can't answer fast enough. A flooring fitter is on their knees all day; a nutritionist is with clients back to back. Enquiries arrive by email, WhatsApp, text, website forms and Checkatrade, and the first business to reply usually wins the job.
+
+This platform answers for them, in their own voice, without taking control away from them:
+
+- **Every message is answered quickly,** on whichever channel it came from, with real free times from the owner's diary or their own booking link.
+- **The owner stays in charge.** Nothing reaches a customer until the owner taps **Approve** on WhatsApp or in the web app. Only once a kind of reply has been approved unchanged several times does the platform *offer* to send replies like it automatically. It never switches that on by itself, it keeps spot-checking, and it tells the owner every time.
+- **The boring follow-ups happen.** Quiet quotes get one polite nudge. Finished jobs get a request for feedback or a review.
+- **Customer data is handled properly.** Each business is walled off from the others in the database. The AI never sees email addresses or phone numbers. Every decision is in an audit log. People can ask for their data to be exported or erased.
+
+One platform serves many businesses ("tenants"). Each picks an **industry pack** (flooring, trades, practitioner) that sets sensible defaults. They then shape every step in **Flows**: how bookings work, how replies sound, when to automate, when to ask for feedback.
+
+**First customers:** The Health Nutritionist (practitioner pack) and trades businesses such as flooring fitters.
+
+## What it does today
+
+| Use case | What happens |
+|---|---|
+| **Answer enquiries** | Any new message is triaged. The platform drafts a reply in the business's voice, an independent reviewer scores it, and it goes to the owner to approve. |
+| **Book appointments** | The owner chooses one of three ways, per business: offer up to three real free times from their Google Calendar (held as tentative events); send their own booking link (Halaxy, Cliniko, Jane, Fresha, Timely, Setmore, Calendly, Acuity, SimplyBook.me or another); or say "I'll arrange a time myself". |
+| **Chase quotes** | The owner marks a quote as sent. If the customer goes quiet for a set number of days, one polite follow-up is drafted. |
+| **Ask for feedback** | Once a booked appointment has ended, or the owner taps **Job done**, the customer is asked how it went, once, with an optional review link. Everyone is asked the same way: the platform never picks only happy customers. |
+| **Checkatrade leads** | Lead emails are read. The owner gets a suggestion: **Interested** or **Not for me** (with the reason). They get the three taps to make in Checkatrade, then replies go straight to the customer. |
+
+**Channels in:** Gmail (checked every minute), WhatsApp, website forms, Checkatrade (email, or the webhook for strategic accounts), and texts (SMS/RCS) forwarded from the owner's iPhone through a small relay on their Mac.
+
+**Channels out:** WhatsApp (inside the 24-hour window) and email are sent automatically after approval. For Checkatrade, texts and phone calls, the owner gets the final wording to paste or say.
 
 ## How it works
 
 ```
-Gmail (checked every minute) ─┐
-WhatsApp (business number) ───┤                      ┌─ triage ─ booking (Google Calendar) ─ draft ─ review ─┐
-Website form webhook ─────────┼─► ingest ─► queue ─► │                                                       │
-Checkatrade email / webhook ──┘   (contact matched   └───────────────────────────────────────────────────────┘
-                                   across channels)                              │
-                                                                                 ▼
-                                             Owner's WhatsApp: [Approve] [Edit] [Reject]
-                                                                                 │
-                                       WhatsApp / Gmail sent automatically · Checkatrade or phone: wording sent to owner
+Gmail ───────────────┐
+WhatsApp ────────────┤
+Website form ────────┼─► ingest ─► queue ─► triage ─► booking ─► reply writer ─► reviewer
+Checkatrade ─────────┤   (same person                (calendar /   (tone, style,     (scores it,
+Texts (Mac relay) ───┘    matched across               link / owner)  examples)         flags doubts)
+                          channels)                                                       │
+                                                                                          ▼
+                                     approveOrAsk(): does the owner need to see this one?
+                                       │                                         │
+                          yes (default, and always for complaints,     no (owner said yes to automating
+                          emergencies, health questions, flagged)       this kind of reply; not a spot check)
+                                       │                                         │
+                                       ▼                                         │
+                  Owner's WhatsApp or web Inbox: [Approve] [Edit] [Reject]       │
+                                       │                                         │
+                                       └──────────────► outbox ◄─────────────────┘
+                                                          │
+                       WhatsApp / email sent · Checkatrade, text or phone: wording sent to the owner
+                       Automatic sends: the owner gets a note on WhatsApp each time
 ```
 
-1. A message arrives on any channel and is saved once, matched to the same person across channels, and queued.
-2. The agents triage it. For a new job they find real free times in the owner's Google Calendar and **hold** up to three, shown as tentative events. They then draft a reply in the business's voice, and an independent reviewer scores it.
-3. The owner gets the draft on WhatsApp with **Approve / Edit / Reject** buttons. Emergencies, complaints and anything the reviewer doubts are marked ⚠️.
-4. **Approve** sends the reply by WhatsApp or email. For Checkatrade, text or phone, the owner gets the final wording to paste or say. **Edit** asks for their wording and sends that. **Reject** sends nothing and frees the held times.
-5. When the customer picks a time, it's confirmed in the diary, the other held times are released, and a confirmation goes to the owner for approval. Unpicked holds expire after 48 hours.
+1. A message arrives on any channel. It is saved once, matched to the same person across channels, and queued.
+2. **Triage** works out what the person wants and whether anything is urgent or sensitive.
+3. **Booking** follows the business's choice in Flows: hold real free times from the calendar, add the booking link, or tell the customer the owner will be in touch.
+4. The **reply writer** drafts a reply using the business's tone, details (greeting, length, emoji, spelling, words to avoid) and up to three example replies the owner has pasted. It copies their style, never the content. An independent **reviewer** scores the draft.
+5. **Code, not the AI, decides** what happens next. By default the owner gets the draft on WhatsApp and in the web Inbox, with **Approve / Edit / Reject**. Emergencies, complaints and anything the reviewer doubts are marked ⚠️.
+6. **Learn, then offer to automate.** Each draft has a *kind*: answering questions, offering times, confirming bookings, quote follow-ups or feedback requests. After the owner approves, say, 5 of one kind without changing a word, they're asked: "Want me to send replies like these automatically from now on?" If they say yes:
+   - those replies go without asking;
+   - every 3rd one (set in Settings) still comes to them as a spot check;
+   - editing or rejecting one switches that kind back to asking.
+
+   Complaints, emergencies, health questions, flagged drafts, new Checkatrade leads, moving bookings, and text, phone and Checkatrade routes are never automated.
+7. When the customer picks a time, it's confirmed in the diary and the other held times are released. Held times that aren't picked expire after 48 hours.
+8. After the job, the feedback request goes through the same approve-or-automate step.
+
+## The admin web app
+
+A phone-friendly web app at `/admin/` on the same server. Owners and staff see only their own business. Platform admins see everything.
+
+**For each business**
+| Tab | What it's for |
+|---|---|
+| **Overview** | **Replies waiting for you**, one at a time: what the customer said, our reply, and big **Approve / Edit / Reject** buttons, with a "1 of 3" counter. Then **Get set up** as a task list (Done / To do / Can't start yet, and what you'll need to have to hand), **This week** (replies sent, average time to reply, bookings, quotes chased, with an optional Friday WhatsApp summary), today's numbers and what needs you. |
+| **Inbox** | Every conversation with its full thread. Drafts show their review scores and an **Approve / Edit / Reject** that works exactly like WhatsApp. Also here: Checkatrade lead cards, **Job done**, "sent automatically" labels, spot-check notes, and automation offers. |
+| **Flows** | Each flow drawn as a row of picture steps, each icon showing the choice made, with the whole flow read as one sentence underneath (tap any underlined part to change it). **Try it** plays a pretend message through the flow and shows the exact reply, without saving, holding or sending anything (owners only, 30 a day). **You approve** shows a trust ladder per kind of reply: Asking you → Ready to offer → Automatic, with a progress bar; kinds that are never automated show a lock and why. **Enquiry flow:** Message arrives → Triage → Booking ⚙ → Reply ⚙ → You approve ⚙ → Sent → Feedback ⚙. **Chasing quotes:** Quote sent → Wait ⚙ → Follow-up → You approve ⚙ → Sent. |
+| **Settings** | Name, sign-off, services and prices, hours, service area, reply routes per channel, spot-check rate, data retention. |
+| **Connections** | Google (Gmail + Calendar), WhatsApp number, website form and Checkatrade webhooks, the Mac text relay. |
+| **People** | Owners, staff and approvers, and their WhatsApp numbers. |
+| **Bookings** | Held and confirmed appointments. |
+| **What happened** | Everything as plain sentences, such as "Sent the reply to Sam automatically by WhatsApp", each saying why, with a **Switch back to asking me** link on automatic sends. The **Details** and **Audit log** tabs keep every agent run with its outcome, versions and cost. |
+| **Data requests** | Export, erase or suppress a person. Each one needs a typed confirmation. |
+
+The whole app uses the Atkinson Hyperlegible font (made for low-vision readers), larger text, 48px buttons, plain words ("Pencilled in", "Looks good / Have a closer look") and status in words as well as colour. On a phone, the decision buttons stay at the bottom of the screen.
+
+**Platform admin only:** Businesses (create, pause, close), Agents (what each agent does, its instructions and running cost), Keys (whether each platform key is set, with a **Test** button; values are never shown), and Map (the live workforce map, showing each block's build status and this week's counts).
+
+**Sign-in and roles**
+- Sign-in is through Supabase Auth with email and password. Platform admins must also pass a two-factor code.
+- Owners change settings, flows, connections and people. Staff can look and approve.
+- A WhatsApp token is encrypted on save and is never returned.
+- Every change goes in the audit log with who made it. The log never contains message text or example replies.
 
 ## What's in the box
 
 | Part | Where |
 |---|---|
-| Database: businesses, people, channels, conversations, drafts, holds, audit log, data requests. Row-level security on every table | `supabase/migrations/` |
-| Webhook server: WhatsApp (signature checked), forms, Checkatrade, Google connection | `src/app.ts` |
-| Worker: agent runs, approvals, sending, Gmail checks, hold expiry, retention, stuck-message sweep | `src/jobs/tasks.ts`, `src/worker.ts` |
-| Use cases | `src/workflows/answer-enquiry.ts`, `src/workflows/chase-quotes.ts` |
-| WhatsApp approvals | `src/approvals.ts` |
+| Database: businesses, people, channels, conversations, drafts, holds, automations, Checkatrade leads, audit log, data requests. Row-level security on every table | `supabase/migrations/` |
+| Webhook server: WhatsApp (signature checked), forms, Checkatrade, texts, Google connection; admin API | `src/app.ts`, `src/admin/` |
+| Worker: agent runs, approvals, sending, Gmail checks, hold expiry, quote chasing (09:00), feedback (10:00), weekly summary (Fridays 16:00), retention, stuck-message sweep | `src/jobs/tasks.ts`, `src/worker.ts` |
+| Use cases | `src/workflows/answer-enquiry.ts`, `chase-quotes.ts`, `ask-feedback.ts` |
+| Try it (a read-only dry run) and the weekly summary | `src/workflows/try-enquiry.ts`, `weekly-summary.ts` |
+| "What happened": the audit log as plain sentences | `src/admin/feed.ts` |
+| Approve or automate, offers, spot checks | `src/automation.ts` |
+| WhatsApp approvals and buttons | `src/approvals.ts` |
+| Approve / reject / edit, shared by WhatsApp and the web app | `src/decisions.ts` |
 | Sending | `src/outbox.ts` |
 | Diary: availability, holds, confirmation | `src/calendar.ts` |
-| Agents (versioned) and sector rules | `config/agents/`, `config/packs/*.md` |
-| Sector templates for onboarding | `config/packs/*.template.json` (flooring, trades, practitioner) |
+| Checkatrade lead reading and suggestions | `src/leads.ts`, `src/channels/parse.ts` |
+| Settings schema (shared by the API and the web form), reply style | `src/settings-schema.ts` |
+| Agents (versioned JSON) and sector rules | `config/agents/`, `config/packs/*.md` |
+| Industry packs for onboarding | `config/packs/*.template.json` (flooring, trades, practitioner) |
+| Mac relay for texts | `tools/mac-sms-relay/` |
 | Onboarding and data-rights commands | `src/cli/` |
-| Admin web app and its API | `apps/admin/`, `src/admin/` |
-| Approve / reject / edit, shared by WhatsApp and the web app | `src/decisions.ts` |
+| Admin web app | `apps/admin/` (Vite + React) |
+
+**Agents** (current versions): triage 1.1.0, booking 1.1.0, drafting 1.5.0, reviewer 1.1.0. Agents judge; code decides. Escalation, slot checks, reply routes and sending rules are TypeScript, not prompts. See `CLAUDE.md`.
+
+## Releasing
+
+Changes arrive as pull requests. To release one:
+1. Merge the pull request.
+2. Run **Migrate production** (Actions tab → Run workflow). It applies new database migrations and publishes new agent versions.
+3. Run **Deploy production**. It copies secrets from Bitwarden into Fly, deploys, and checks `/health`.
+
+## Release history
+
+| # | Date | What changed |
+|---|---|---|
+| 18 | 21 Nov 2026 | **Making it obvious:** all nine design ideas. Replies waiting one at a time; setup as a task list; This week, with an optional Friday WhatsApp summary; the flow as pictures and a sentence; **Try it**; the trust ladder; "What happened" in plain sentences with a switch-back link; plain words, a more readable font and bigger buttons throughout. |
+| 17 | 21 Nov 2026 | This README and `docs/design-ideas.md`. |
+| 16 | 20 Nov 2026 | **Flows → Reply:** pick a tone (Warm and friendly, Professional, Short), each with a sector example, or describe your own. Also set the details (greeting, length, emoji, spelling, words to avoid) and paste up to three of your own replies to copy the style of. Contact details are removed from examples. Drafting agent 1.5.0. |
+| 15 | 20 Nov 2026 | **Booking link:** a third booking choice that sends the business's own booking page (Halaxy, Cliniko, Fresha…). The code adds the link if the reply leaves it out. Drafting agent 1.4.0. |
+| 14 | 20 Nov 2026 | **Flows tab** (replaces Use cases), with per-step choices: book from the calendar or "I'll arrange it". **Learn, then offer to automate**, with spot checks and a note on every automatic send. **Ask for feedback** after the job, with an optional review link. Drafting agent 1.3.0. |
+| 13 | 19 Nov 2026 | **Checkatrade:** lead emails read in any layout, **Interested / Not for me** suggestions, three-step instructions, the customer's details added by WhatsApp or the web, then direct replies. Fixed WhatsApp being chosen outside its 24-hour window. |
+| 12 | 19 Nov 2026 | **Texts** from the owner's iPhone, through a relay on their Mac. Map: WhatsApp review, industry pack explanations, Current / Future filter. |
+| 10–11 | 19 Nov 2026 | **Live workforce map** for platform admins, rebuilt around the map's blocks and their live status. |
+| 9 | 19 Nov 2026 | **Agents page** explaining each agent, **Keys page** (set or not, and a Test button), and a setup checklist per business. |
+| 4–8 | 18 Nov 2026 | **Deployed to Fly.io London.** Secrets go from Bitwarden into Fly. Agents moved to cheaper current models. |
+| 3 | 5 Nov 2026 | **Chase quotes.** |
+| 2 | 5 Nov 2026 | **Admin web app** and its API. Approval decisions are shared with WhatsApp. |
 
 ## One-time setup
 
@@ -108,7 +212,7 @@ Production secrets never live in files, code, chat or GitHub. They live in **Bit
 2. Add each production secret, named exactly as the variable in `.env.example`: `DATABASE_URL`, `DATA_ENCRYPTION_KEY`, `SIGNING_SECRET`, `ANTHROPIC_API_KEY`, `WA_APP_SECRET`, `WA_VERIFY_TOKEN`, `PLATFORM_WA_PHONE_NUMBER_ID`, `PLATFORM_WA_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_BASE_URL`. Names must have no spaces.
 3. Create two **machine accounts**, each with read access to that project only:
    - `laptop`: its access token is stored as an item in your Bitwarden password manager, never in a file.
-   - `github-actions`: its access token goes in GitHub → Settings → Environments → `production` → secret `BW_ACCESS_TOKEN`. In the same environment, add variables `BW_SECRET_ID_DATABASE_URL`, `BW_SECRET_ID_DATA_ENCRYPTION_KEY` and `BW_SECRET_ID_SIGNING_SECRET`, holding each secret's Bitwarden ID (not its value). Turn on **Required reviewers** so production runs need your approval.
+   - `github-actions`: its access token goes in GitHub → Settings → Environments → `production` → secret `BW_ACCESS_TOKEN`. In the same environment, add variables `BW_SECRET_ID_DATABASE_URL`, `BW_SECRET_ID_DATA_ENCRYPTION_KEY` and `BW_SECRET_ID_SIGNING_SECRET`, holding each secret's Bitwarden ID (not its value).
 4. Install the Bitwarden Secrets Manager CLI, `bws`.
 
 **Running a production command from a terminal**
@@ -166,33 +270,25 @@ Checkatrade lead emails are picked up automatically from their Gmail.
   npm run prod:data -- suppress --slug marks-flooring --email jo@example.com --reason "opted out"
   ```
 
-## Admin web app
 
-A mobile-friendly web app at `/admin/` on the same server. Platform admins see every business; owners and staff see only their own. The API is under `/api` (`src/admin/`), the app is in `apps/admin/` (Vite + React).
+## Admin web app: setting up
 
-- **Sign-in:** Supabase Auth, email and password. Platform admins must also pass a TOTP code (the session must be `aal2`), otherwise they get no admin powers.
-- **Roles:** owners change settings, connections and people. Staff can view and approve drafts. Owners can pause and resume their own business. Platform admins can also create businesses, close them, and see agent versions.
-- **Approve / Edit / Reject** in the inbox use the same code as the WhatsApp buttons (`src/decisions.ts`), so a double tap on either never sends twice.
-- **Secrets are write-only:** a WhatsApp token is encrypted on save and is never returned by any endpoint.
-- Every change is in the audit log with who made it. Settings changes keep the previous version.
+The API is under `/api` (`src/admin/`), the app is in `apps/admin/`. Production builds it into the container image, so a deploy is enough. For a fresh install:
 
-**Set up**
-1. In Supabase: Authentication → Providers: keep email on. Authentication → Multi-factor: enable TOTP. Turn off public sign-ups (people are added by an admin or an owner).
-2. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_JWT_SECRET` (Project Settings → API). With a newer project that signs with asymmetric keys, leave `SUPABASE_JWT_SECRET` empty and the server uses the project's published keys.
-3. Run the migrations (`npm run migrate`). This adds `platform_admins`.
-4. Create your own login in Supabase (Authentication → Users), then add yourself as a platform admin:
+1. In Supabase:
+   - Authentication → Providers: keep email on.
+   - Authentication → Multi-factor: enable TOTP.
+   - Turn off public sign-ups. People are added by an admin or an owner.
+2. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_JWT_SECRET` (Project Settings → API). With a newer project that signs with asymmetric keys, leave `SUPABASE_JWT_SECRET` empty.
+3. Run the migrations. This adds `platform_admins`.
+4. Create your own login in Supabase (Authentication → Users). Then make yourself a platform admin:
    ```sql
    insert into platform_admins (user_id, email) values ('<your auth user id>', '<your email>');
    ```
-5. Build the app, then start the server **from the repository root** (it serves `apps/admin/dist`):
-   ```bash
-   npm run admin:install && npm run admin:build
-   npm run server
-   ```
-   Sign in at `https://<your domain>/admin/`. You'll be asked to set up two-factor on first sign-in.
+5. Sign in at `https://<your domain>/admin/`. You'll be asked to set up two-factor on first sign-in.
 6. Create a business, then add its owner under **People**. When the owner first signs in with the same email address, their login is linked automatically.
 
-For local work, `npm run admin:dev` runs the app with hot reload and proxies `/api` to the server.
+For local work, `npm run admin:install && npm run admin:dev` runs the app with hot reload.
 
 ## Tests
 
@@ -200,103 +296,57 @@ For local work, `npm run admin:dev` runs the app with hot reload and proxies `/a
 TEST_DATABASE_URL=postgres://...throwaway... npm test
 ```
 
-The tests wipe that database. They run the whole journey against real Postgres, with Google and WhatsApp faked:
+The tests wipe that database. They run whole journeys against real Postgres, with Google, WhatsApp and the AI faked (`AGENT_MODE=mock`). There are 77 tests across `test/platform`, `admin`, `flows`, `chase`, `checkatrade` and `runner`. Among the things they check:
 
-- A WhatsApp enquiry gets three held times, an approval and a sent reply.
-- The customer picks a time, the booking is confirmed and the other holds are released.
-- A Checkatrade email produces wording for the owner to paste.
-- An owner edit is sent as written.
-- A complaint is flagged and rejected without anything being sent.
-- A double-tapped button doesn't send twice.
-- A website form webhook arrives as a message for the right business.
-- Row-level security keeps businesses apart.
-- The audit log can't be edited.
-- Erasing a person removes their details and cancels their booking.
-- Messages for a paused business are stored but not acted on.
+- **Enquiries:** a WhatsApp enquiry gets held times, an approval and a sent reply. The customer picks a time, the booking is confirmed, and the other holds are released.
+- **Owner decisions:** an owner's edit is sent as written. A complaint is flagged and nothing is sent. A double-tapped button doesn't send twice, on WhatsApp or the web.
+- **Booking choices:**
+  - With the "I'll arrange it" choice, no times are offered.
+  - With a booking link, the link is always in the reply.
+  - The reply style reaches the reply writer.
+- **Automation:**
+  - It is offered after the set number of unchanged approvals.
+  - Once switched on, replies go without asking and the owner is told each time.
+  - Every 3rd reply is a spot check, and an edit pauses automation.
+  - Complaints are never automated.
+- **Feedback:** asked once after the job ends, not before.
+- **Checkatrade:** Interested, Not for me and spam journeys, plus the email reader's layouts.
+- **Chasing quotes:** one follow-up, and none if the customer replied, opted out, or the quote is too old.
+- **Keeping businesses apart:** one business can't see another's data, in the database, API or web app, including automations and Checkatrade leads.
+- **Making it obvious:** replies waiting come in the right order; "What happened" says why each automatic send went and offers the switch back; **Try it** writes nothing and sends nothing, and flags a complaint; the weekly summary counts correctly and isn't sent for an empty week.
+- **Records and data rights:** the audit log can't be edited. Erasing a person removes their details and cancels their booking.
 
 ## Limits to know before the first customers
 
-- **Google verification.** While the Google app is in *Testing*, only test users you list can connect (up to 100), and their connection expires every 7 days. Before real customers, submit the app for verification. Reading Gmail is a restricted scope and needs an annual independent security assessment. Calendar alone is much lighter.
-- **WhatsApp for each business.** Connecting a business's own number is done by hand for now (phone number id + token). For scale, become a Meta Tech Provider and add Embedded Signup. WhatsApp replies to customers only go out within 24 hours of their last message; after that the owner is told to reply directly.
-- **Checkatrade.** There's no reply API, so the owner pastes Checkatrade replies themselves. The lead webhook is only for strategic accounts. Most leads arrive by email, which is covered.
-- **Not built yet:** Outlook, Instagram and Facebook DMs, SMS, self-serve sign-up, billing, and auto-send without approval.
+- **Google verification.** While the Google app is in *Testing*, only listed test users can connect (up to 100), and their connection expires every 7 days. Submit for verification before real customers. Reading Gmail is a restricted scope and needs an annual independent security assessment.
+- **WhatsApp for each business** is connected by hand for now (phone number ID + token). For scale, become a Meta Tech Provider and add Embedded Signup. WhatsApp replies only go out within 24 hours of the customer's last message.
+- **Checkatrade** has no reply API and doesn't allow bots in its app, so the owner taps "I'm interested" themselves. The platform makes that take seconds.
+- **Booking systems** (Halaxy, Cliniko…) are linked to, not connected: the customer books on the business's own page, and the platform doesn't see those bookings yet.
+- **Try it uses real AI calls,** so it needs Claude API credit. It is limited to owners and 30 tries a day per business.
+- **The Friday WhatsApp summary** can only reach the owner inside WhatsApp's 24-hour window until the approval template is set up.
+- **Not built yet:** Outlook, Instagram and Facebook DMs, self-serve sign-up, billing, magic-link and Google sign-in, invite emails.
 
 ## Next build
 
-Work through these in order. Each phase should leave `npm run typecheck` and `npm test` passing, and follow `CLAUDE.md`.
+### Now: get the first business live
+1. Finish Google OAuth consent for Test Business. Add Claude API credit and press **Test** on the Keys page.
+2. Switch on Test Business and send a real test enquiry end to end.
+3. Set up WhatsApp (platform number and approval template). Optionally, set up the Mac text relay.
+4. Tune the Checkatrade reader on a real lead email.
+5. **Onboard The Health Nutritionist** (practitioner pack, likely the Halaxy booking link).
 
-### Phase 0: get production running
+### Next: keeping it easy to use
+- The design ideas in `docs/design-ideas.md` are all built (#18). To keep the app that way:
+  - write the design rules into `CLAUDE.md` so every change follows them;
+  - run an automatic accessibility scan and take phone-width screenshots on every pull request;
+  - watch a few owners use it for real tasks, starting with the first live business.
+- Order materials for a job. When a job is confirmed, draft the supplier order for delivery the day before.
+- A standard skill format (trigger, agents, tools, approval rule), so new use cases are mostly configuration.
 
-1. **Migrate production goes green.** Done 18 Nov 2026: tables created and agents published.
-2. **Deploy the server and worker** to Fly.io in London (`fly.toml`, `Dockerfile`; see [Deploying to Fly.io](#deploying-to-flyio)). `/health` should respond on the public URL.
-3. **Onboard The Health Nutritionist** as the first business and test the full loop on a real inbox.
-
-### Phase 1: admin web app (built; see [Admin web app](#admin-web-app))
-
-The first version is built and tested. Still to do: magic-link and Google sign-in (email and password only for now), invite emails (owners are added by an admin and signed in with a password you set in Supabase), a template manager, and a check against a real Supabase project. The original brief follows for reference.
-
-A web app where the platform admin (Charlotte) and each business owner can see and manage settings, instead of using the command line and the Supabase table editor.
-
-**Users and roles**
-- **Platform admin:** sees every business. Creates, pauses and activates businesses. Manages templates and agent versions, and handles data requests.
-- **Business owner / staff:** sees only their own business. Owners can change settings and connections; staff can view and approve.
-- **Sign-in:** Supabase Auth (email magic link plus Google sign-in), with two-factor required for platform admins.
-- **Linking people to businesses:** `tenant_members.user_id` already links a login to a business, and the `member_read` policies in the migration already allow members to read their own business's rows.
-- **Platform admins:** a new `platform_admins` table (user_id). Never give the browser the service-role key.
-
-**Screens**
-1. **Businesses** (admin only): a list with status, pack, last message received, drafts waiting, and connection problems. Includes a **New business** form, which replaces `npm run tenant -- create`.
-2. **Business overview:** status (onboarding / active / paused, with buttons to change it), today's numbers, and anything needing attention: failed sends, broken connections, ⚠️ drafts.
-3. **Settings:** an editable form for `tenants.settings`:
-   - name, tone, sign-off and reply guidance;
-   - services (name, duration, price) and price guide (item, range);
-   - working days and hours, service area (postcode districts) and timezone;
-   - reply routes per channel (ordered list);
-   - spot-check rate, reviewer pass score and retention days;
-   - Checkatrade sender addresses.
-
-   Validate on the server with one shared schema, using zod for both the form and the API. Save a copy of the old version in the audit log for every change.
-4. **Use cases:** switch Answer enquiries and Book appointments on and off (`tenant_use_cases`).
-5. **Connections:**
-   - Google: status and account, with **Connect / Reconnect**, using the existing `/connect/google` link.
-   - WhatsApp number: status, plus a form to add the phone number ID and token. The token is posted once, encrypted on the server, and never shown again.
-   - Website form and Checkatrade webhooks: create, show the URL with a copy button, and disable.
-   - The last error shown for each.
-6. **People:** owners, staff and approvers, with their WhatsApp numbers, the approver flag, and invites by email.
-7. **Inbox:** conversations with the full thread, each draft (original vs edited), its review scores and status. **Approve / Edit / Reject buttons that do exactly what the WhatsApp buttons do.** Reuse the same decision function so the two can never disagree.
-8. **Bookings:** held and confirmed appointments, with cancel and release.
-9. **Activity:** runs (outcome, reason, agents and versions used, tokens) and the audit log, filterable.
-10. **Data requests** (admin, plus owner for their own business): export, erase and suppress a person (`src/data-rights.ts`), each needing a typed confirmation.
-11. **Agents** (admin only): published agent versions and which version each business is pinned to. Read-only to begin with.
-
-**How to build it**
-- **Same repository:** `apps/admin` as a Next.js (App Router) app or Vite + React. Move shared code (types, settings schema, db helpers) into `packages/core`, or import it from `src/`.
-- **Every read and write goes through the server** using `withTenant(tenantId)`, after checking the signed-in user is a member of that business, or a platform admin. Row-level security stays the backstop. Business-scoped pages must not use `withAdmin`.
-- **Secrets are write-only:** tokens can be replaced but never read back to the browser. Show "connected as …" and the date instead.
-- **Every change goes in the audit log,** with who made it and what changed. Exclude secrets and message text.
-- **Hosting:** the same host and region as the server, with its own URL (e.g. `admin.<domain>`), HTTPS only, secure cookies and CSRF protection on forms.
-- **Design:** simple, works on a phone (owners will use it on site), clear status colours, no jargon. Use British English.
-
-**Tests to add**
-- An owner of business A can't see or change business B: page, API and database.
-- Staff can't change settings; owners can; platform admins can see all businesses.
-- Approving in the web app and on WhatsApp produces the same result, and double approval doesn't send twice.
-- Saving invalid settings (e.g. working hours end before they start) is rejected with a clear message.
-- A replaced WhatsApp token is stored encrypted and never returned by any API.
-
-**Done when:** a new business can be created, configured, connected and activated entirely from the web app. The owner can log in and manage their own settings and drafts.
-
-### Phase 2: next skills for trades (the floor layer)
-
-- **A standard skill format:** trigger (message, schedule or event such as a job booked), agents, permitted tools, approval rule. New use cases then become configuration plus a small workflow.
-- **Chase quotes (built):** the owner taps "Mark quote as sent" on a conversation in the web app. If the customer says nothing for 3 days (per business: `tenant_use_cases.config.afterDays`), a daily job (09:00) drafts one polite follow-up from a fixed template, which goes through the normal approval. Skipped if the customer has replied, has a reply waiting, opted out, or the quote is over 30 days old. WhatsApp is only used while its 24-hour window is open; otherwise email, or a call suggestion. On by default for the flooring and trades templates. Marking the quote as sent again re-arms it. Tests: `test/chase.test.ts`.
-- **Order materials for a job:** when a job is confirmed, draft the supplier order for delivery the day before, add it to the diary, and send for approval.
-- **Ask for reviews:** after the job, send a Google or Checkatrade review request.
-
-### Phase 3: before more customers
-
-- **Google app verification** (restricted Gmail scope, annual security assessment). Start early, it takes weeks.
-- **Meta Tech Provider status and WhatsApp Embedded Signup,** so owners connect their own number from the web app.
-- **Billing** (Stripe) per business, and **self-serve sign-up** using the web app's onboarding.
-- **Separate development and production** Supabase projects, plus database network restrictions to the app host.
-- **Data processing agreement, privacy notice** and a DPIA for the practitioner pack.
+### Before more customers
+- Google app verification. Start early: it takes weeks.
+- Meta Tech Provider status and WhatsApp Embedded Signup.
+- Billing (Stripe) and self-serve sign-up.
+- Separate development and production Supabase projects. Restrict database network access to the app host.
+- Move Google Cloud and Fly to a business account.
+- A data processing agreement, a privacy notice, and a DPIA for the practitioner pack.
