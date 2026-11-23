@@ -1,6 +1,6 @@
 # Design ideas: making the admin app obvious
 
-These are ideas borrowed from software that explains complicated things simply: GOV.UK, ScratchJr, Duolingo, Monzo, Apple Shortcuts, Microsoft Inclusive Design and LEGO instructions. A version with phone sketches is published as a private page on claude.ai (link in the pull request). Nothing here is built yet.
+These are ideas borrowed from software that explains complicated things simply: GOV.UK, ScratchJr, Duolingo, Monzo, Apple Shortcuts, Microsoft Inclusive Design and LEGO instructions. A version with phone sketches is published as a private page on claude.ai (link in the pull request). **All nine ideas are built and live (pull request #18, 21 Nov 2026).** The table below says where each one is in the app.
 
 ## Five rules behind every idea
 - **One thing at a time.** Each screen asks one question or shows one job (GOV.UK).

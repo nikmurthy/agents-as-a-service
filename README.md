@@ -76,15 +76,17 @@ A phone-friendly web app at `/admin/` on the same server. Owners and staff see o
 **For each business**
 | Tab | What it's for |
 |---|---|
-| **Overview** | Status (onboarding / active / paused), today's numbers, what needs attention, and a setup checklist. |
+| **Overview** | **Replies waiting for you**, one at a time: what the customer said, our reply, and big **Approve / Edit / Reject** buttons, with a "1 of 3" counter. Then **Get set up** as a task list (Done / To do / Can't start yet, and what you'll need to have to hand), **This week** (replies sent, average time to reply, bookings, quotes chased, with an optional Friday WhatsApp summary), today's numbers and what needs you. |
 | **Inbox** | Every conversation with its full thread. Drafts show their review scores and an **Approve / Edit / Reject** that works exactly like WhatsApp. Also here: Checkatrade lead cards, **Job done**, "sent automatically" labels, spot-check notes, and automation offers. |
-| **Flows** | Each flow drawn as a row of steps. Tap a step to see what it does and change it. **Enquiry flow:** Message arrives → Triage → Booking ⚙ → Reply ⚙ → You approve ⚙ → Sent → Feedback ⚙. **Chasing quotes:** Quote sent → Wait ⚙ → Follow-up → You approve ⚙ → Sent. |
+| **Flows** | Each flow drawn as a row of picture steps, each icon showing the choice made, with the whole flow read as one sentence underneath (tap any underlined part to change it). **Try it** plays a pretend message through the flow and shows the exact reply, without saving, holding or sending anything (owners only, 30 a day). **You approve** shows a trust ladder per kind of reply: Asking you → Ready to offer → Automatic, with a progress bar; kinds that are never automated show a lock and why. **Enquiry flow:** Message arrives → Triage → Booking ⚙ → Reply ⚙ → You approve ⚙ → Sent → Feedback ⚙. **Chasing quotes:** Quote sent → Wait ⚙ → Follow-up → You approve ⚙ → Sent. |
 | **Settings** | Name, sign-off, services and prices, hours, service area, reply routes per channel, spot-check rate, data retention. |
 | **Connections** | Google (Gmail + Calendar), WhatsApp number, website form and Checkatrade webhooks, the Mac text relay. |
 | **People** | Owners, staff and approvers, and their WhatsApp numbers. |
 | **Bookings** | Held and confirmed appointments. |
-| **Activity** | Every agent run, with its outcome, versions and cost, plus the audit log. |
+| **What happened** | Everything as plain sentences, such as "Sent the reply to Sam automatically by WhatsApp", each saying why, with a **Switch back to asking me** link on automatic sends. The **Details** and **Audit log** tabs keep every agent run with its outcome, versions and cost. |
 | **Data requests** | Export, erase or suppress a person. Each one needs a typed confirmation. |
+
+The whole app uses the Atkinson Hyperlegible font (made for low-vision readers), larger text, 48px buttons, plain words ("Pencilled in", "Looks good / Have a closer look") and status in words as well as colour. On a phone, the decision buttons stay at the bottom of the screen.
 
 **Platform admin only:** Businesses (create, pause, close), Agents (what each agent does, its instructions and running cost), Keys (whether each platform key is set, with a **Test** button; values are never shown), and Map (the live workforce map, showing each block's build status and this week's counts).
 
@@ -100,8 +102,10 @@ A phone-friendly web app at `/admin/` on the same server. Owners and staff see o
 |---|---|
 | Database: businesses, people, channels, conversations, drafts, holds, automations, Checkatrade leads, audit log, data requests. Row-level security on every table | `supabase/migrations/` |
 | Webhook server: WhatsApp (signature checked), forms, Checkatrade, texts, Google connection; admin API | `src/app.ts`, `src/admin/` |
-| Worker: agent runs, approvals, sending, Gmail checks, hold expiry, quote chasing (09:00), feedback (10:00), retention, stuck-message sweep | `src/jobs/tasks.ts`, `src/worker.ts` |
+| Worker: agent runs, approvals, sending, Gmail checks, hold expiry, quote chasing (09:00), feedback (10:00), weekly summary (Fridays 16:00), retention, stuck-message sweep | `src/jobs/tasks.ts`, `src/worker.ts` |
 | Use cases | `src/workflows/answer-enquiry.ts`, `chase-quotes.ts`, `ask-feedback.ts` |
+| Try it (a read-only dry run) and the weekly summary | `src/workflows/try-enquiry.ts`, `weekly-summary.ts` |
+| "What happened": the audit log as plain sentences | `src/admin/feed.ts` |
 | Approve or automate, offers, spot checks | `src/automation.ts` |
 | WhatsApp approvals and buttons | `src/approvals.ts` |
 | Approve / reject / edit, shared by WhatsApp and the web app | `src/decisions.ts` |
@@ -128,6 +132,8 @@ Changes arrive as pull requests. To release one:
 
 | # | Date | What changed |
 |---|---|---|
+| 18 | 21 Nov 2026 | **Making it obvious:** all nine design ideas. Replies waiting one at a time; setup as a task list; This week, with an optional Friday WhatsApp summary; the flow as pictures and a sentence; **Try it**; the trust ladder; "What happened" in plain sentences with a switch-back link; plain words, a more readable font and bigger buttons throughout. |
+| 17 | 21 Nov 2026 | This README and `docs/design-ideas.md`. |
 | 16 | 20 Nov 2026 | **Flows → Reply:** pick a tone (Warm and friendly, Professional, Short), each with a sector example, or describe your own. Also set the details (greeting, length, emoji, spelling, words to avoid) and paste up to three of your own replies to copy the style of. Contact details are removed from examples. Drafting agent 1.5.0. |
 | 15 | 20 Nov 2026 | **Booking link:** a third booking choice that sends the business's own booking page (Halaxy, Cliniko, Fresha…). The code adds the link if the reply leaves it out. Drafting agent 1.4.0. |
 | 14 | 20 Nov 2026 | **Flows tab** (replaces Use cases), with per-step choices: book from the calendar or "I'll arrange it". **Learn, then offer to automate**, with spot checks and a note on every automatic send. **Ask for feedback** after the job, with an optional review link. Drafting agent 1.3.0. |
@@ -290,7 +296,7 @@ For local work, `npm run admin:install && npm run admin:dev` runs the app with h
 TEST_DATABASE_URL=postgres://...throwaway... npm test
 ```
 
-The tests wipe that database. They run whole journeys against real Postgres, with Google, WhatsApp and the AI faked (`AGENT_MODE=mock`). There are 73 tests across `test/platform`, `admin`, `flows`, `chase`, `checkatrade` and `runner`. Among the things they check:
+The tests wipe that database. They run whole journeys against real Postgres, with Google, WhatsApp and the AI faked (`AGENT_MODE=mock`). There are 77 tests across `test/platform`, `admin`, `flows`, `chase`, `checkatrade` and `runner`. Among the things they check:
 
 - **Enquiries:** a WhatsApp enquiry gets held times, an approval and a sent reply. The customer picks a time, the booking is confirmed, and the other holds are released.
 - **Owner decisions:** an owner's edit is sent as written. A complaint is flagged and nothing is sent. A double-tapped button doesn't send twice, on WhatsApp or the web.
@@ -307,6 +313,7 @@ The tests wipe that database. They run whole journeys against real Postgres, wit
 - **Checkatrade:** Interested, Not for me and spam journeys, plus the email reader's layouts.
 - **Chasing quotes:** one follow-up, and none if the customer replied, opted out, or the quote is too old.
 - **Keeping businesses apart:** one business can't see another's data, in the database, API or web app, including automations and Checkatrade leads.
+- **Making it obvious:** replies waiting come in the right order; "What happened" says why each automatic send went and offers the switch back; **Try it** writes nothing and sends nothing, and flags a complaint; the weekly summary counts correctly and isn't sent for an empty week.
 - **Records and data rights:** the audit log can't be edited. Erasing a person removes their details and cancels their booking.
 
 ## Limits to know before the first customers
@@ -315,6 +322,8 @@ The tests wipe that database. They run whole journeys against real Postgres, wit
 - **WhatsApp for each business** is connected by hand for now (phone number ID + token). For scale, become a Meta Tech Provider and add Embedded Signup. WhatsApp replies only go out within 24 hours of the customer's last message.
 - **Checkatrade** has no reply API and doesn't allow bots in its app, so the owner taps "I'm interested" themselves. The platform makes that take seconds.
 - **Booking systems** (Halaxy, Cliniko…) are linked to, not connected: the customer books on the business's own page, and the platform doesn't see those bookings yet.
+- **Try it uses real AI calls,** so it needs Claude API credit. It is limited to owners and 30 tries a day per business.
+- **The Friday WhatsApp summary** can only reach the owner inside WhatsApp's 24-hour window until the approval template is set up.
 - **Not built yet:** Outlook, Instagram and Facebook DMs, self-serve sign-up, billing, magic-link and Google sign-in, invite emails.
 
 ## Next build
@@ -326,8 +335,11 @@ The tests wipe that database. They run whole journeys against real Postgres, wit
 4. Tune the Checkatrade reader on a real lead email.
 5. **Onboard The Health Nutritionist** (practitioner pack, likely the Halaxy booking link).
 
-### Next: making it easier to use
-- Design ideas for the admin app, drawn from accessible and children's software: see `docs/design-ideas.md`.
+### Next: keeping it easy to use
+- The design ideas in `docs/design-ideas.md` are all built (#18). To keep the app that way:
+  - write the design rules into `CLAUDE.md` so every change follows them;
+  - run an automatic accessibility scan and take phone-width screenshots on every pull request;
+  - watch a few owners use it for real tasks, starting with the first live business.
 - Order materials for a job. When a job is confirmed, draft the supplier order for delivery the day before.
 - A standard skill format (trigger, agents, tools, approval rule), so new use cases are mostly configuration.
 
