@@ -12,6 +12,7 @@ async function triage(input: any): Promise<TriageResult> {
   const base = { missingInfo: [] as string[], inServiceArea: null };
   if (has(all, /smell(ing)? gas|through (the )?ceiling/)) return { ...base, intent: "emergency", urgency: "emergency", needsHuman: true, nextStep: "escalate", reason: "Emergency." };
   if (has(all, /unsubscribe|trade prices/)) return { ...base, intent: "spam", urgency: "low", needsHuman: false, nextStep: "ignore", reason: "Marketing." };
+  if (has(all, /\bpint\b|pub tonight|love you|happy birthday/)) return { ...base, intent: "other", urgency: "low", needsHuman: false, nextStep: "ignore", reason: "A personal message." };
   if (has(all, /inverness|\biv\d/)) return { ...base, inServiceArea: false, intent: "quote_request", urgency: "normal", needsHuman: false, nextStep: "reply_with_info", reason: "Outside the service area." };
   if (has(all, /black square tiles|not happy|gaps opening|complain/)) return { ...base, intent: "complaint", urgency: "normal", needsHuman: true, nextStep: "escalate", reason: "Needs the owner." };
   if (input.offeredTimes?.length && has(all, /works|suits|perfect|that one|book me in|monday|tuesday|wednesday|thursday|friday|saturday/))

@@ -6,7 +6,7 @@ import { googleRedirectUri } from "../google-link.js";
 // Platform keys live in Bitwarden and reach the app as environment variables (see README, "Deploying to Fly.io").
 // The admin app may only learn whether each one is set and whether it works. Never return a value.
 
-export type Service = "claude" | "google" | "whatsapp";
+export type Service = "claude" | "google" | "whatsapp" | "whatsapp_signup";
 
 const SERVICES: { id: Service; name: string; purpose: string; keys: string[]; where: string }[] = [
   {
@@ -26,6 +26,12 @@ const SERVICES: { id: Service; name: string; purpose: string; keys: string[]; wh
     purpose: "The platform's own number, which sends owners their approval requests, and the webhook that receives WhatsApp messages.",
     keys: ["PLATFORM_WA_PHONE_NUMBER_ID", "PLATFORM_WA_TOKEN", "WA_APP_SECRET", "WA_VERIFY_TOKEN"],
     where: "Meta for Developers → your app → WhatsApp → API setup, and App settings → Basic for the app secret.",
+  },
+  {
+    id: "whatsapp_signup", name: "WhatsApp Business app numbers",
+    purpose: "Lets a sole trader connect the one number they already use in the WhatsApp Business app (Meta Embedded Signup). Needs Meta Tech Provider approval.",
+    keys: ["META_APP_ID", "META_SIGNUP_CONFIG_ID"],
+    where: "Meta for Developers → your app → App settings → Basic for the App ID; Facebook Login for Business → Configurations for the configuration ID.",
   },
 ];
 
@@ -52,6 +58,7 @@ export async function testService(id: Service): Promise<{ ok: boolean; detail: s
       return { ok: true, detail: "Claude answered. The key works and there is credit." };
     }
     if (id === "google") return await clients.google.checkClient(googleRedirectUri());
+    if (id === "whatsapp_signup") return { ok: true, detail: "Both are set. Meta checks them when a business connects its number." };
     return await clients.whatsapp.checkSender({ phoneNumberId: env.platformWaPhoneNumberId, accessToken: env.platformWaToken });
   } catch (e: any) {
     const msg = String(e?.message ?? e);

@@ -65,7 +65,7 @@ export function useAction() {
 // Statuses in the owner's words rather than the database's.
 const WORDS: Record<string, string> = {
   pending_approval: "waiting for you", held: "pencilled in", confirmed: "booked", manual: "for you to send", approved: "approved, sending",
-  rejected: "not sent", released: "released", expired: "not picked", failed: "didn't send", onboarding: "being set up",
+  rejected: "not sent", released: "released", expired: "not picked", failed: "didn't send", onboarding: "being set up", superseded: "you answered yourself",
 };
 
 export function Status({ value }: { value: string }) {

@@ -76,7 +76,7 @@ export function describe(r: any, tz: string): FeedItem | undefined {
     case "run.escalated":
       return item("assistant", "A message needs you. It looked like a complaint, an emergency or a health question, so it's waiting for you and won't be sent automatically.");
     case "run.ignored":
-      return item("assistant", "A message was set aside as spam. Nothing was sent.");
+      return item("assistant", "A message was set aside as spam or a personal chat. Nothing was sent.");
     case "run.skipped":
       return item("assistant", "A message was kept but not answered, because the business was paused or still being set up.");
     case "booking.held":
@@ -139,7 +139,18 @@ export function describe(r: any, tz: string): FeedItem | undefined {
     case "member.updated": return item("you", `${you} changed a person's details.`);
     case "member.removed": return item("you", `${you} removed a person.`);
     case "google.connected": return item("you", "Google was connected.");
-    case "whatsapp.connected": return item("you", "A WhatsApp number was connected.");
+    case "whatsapp.connected":
+      return r.detail?.coexistence
+        ? item("you", "Your WhatsApp Business number was connected. You keep using the app as before.", "People saved in your phone are left alone unless they're already customers.")
+        : item("you", "A WhatsApp number was connected.");
+    case "whatsapp_people.changed":
+      return item("you", r.detail?.people === "everyone" ? `${you} chose to answer everyone who messages on WhatsApp.` : `${you} chose to answer only new people and customers on WhatsApp.`);
+    case "reply.owner_answered":
+      return item("you", `You answered ${name} yourself in WhatsApp.`, r.detail?.dropped ? "So the reply waiting for you was dropped, and nothing else was sent." : undefined);
+    case "contact.ignored":
+      return item("you", `${you} chose to ignore ${name}. Their messages won't be kept or answered.`, "It was a personal chat, not a customer.");
+    case "contact.unignored":
+      return item("you", `${you} stopped ignoring ${name}.`);
     case "connection.disabled": return item("you", `${you} switched off a connection.`);
     case "tenant.status_changed":
       return item(r.actor === "system" ? "platform" : "you", `${you} ${r.detail?.to === "paused" ? "paused the business" : r.detail?.to === "active" ? "switched the business on" : "changed the business's status"}.`);

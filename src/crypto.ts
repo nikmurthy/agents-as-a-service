@@ -50,4 +50,8 @@ export function verifyMetaSignature(rawBody: string, header: string | undefined,
   return got.length === expected.length && timingSafeEqual(got, expected);
 }
 
+/** A keyed one-way hash of a phone number, scoped to one business. Lets us recognise a number without keeping it. */
+export const phoneHash = (tenantId: string, phone: string) =>
+  createHmac("sha256", env.signingSecret).update(`${tenantId}:${phone}`).digest("base64url");
+
 export const randomToken = (bytes = 18) => randomBytes(bytes).toString("base64url");

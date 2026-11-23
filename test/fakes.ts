@@ -41,8 +41,14 @@ export function fakeWhatsApp() {
     sendText: async (from, to, text) => { sent.push({ kind: "text", from: from.phoneNumberId, to, text }); return { id: `wamid.${++n}` }; },
     sendButtons: async (from, to, body, buttons) => { sent.push({ kind: "buttons", from: from.phoneNumberId, to, text: body, buttons: buttons.map((b) => b.id) }); return { id: `wamid.${++n}` }; },
     sendTemplate: async (from, to, _name, _lang, params, payloads) => { sent.push({ kind: "template", from: from.phoneNumberId, to, text: params.join(" | "), buttons: payloads }); return { id: `wamid.${++n}` }; },
+    exchangeSignupCode: async (code) => { signup.push(`exchange:${code}`); return { accessToken: `biz-token-${code}` }; },
+    subscribeApp: async (wabaId, token) => { signup.push(`subscribe:${wabaId}:${token}`); },
+    accountNumbers: async () => ["BIZ_APP_NUMBER"],
+    numberInfo: async (from) => ({ displayPhone: "+44 7700 900777", verifiedName: "Sole Trader", onBusinessApp: from.phoneNumberId !== "NOT_ON_APP" }),
+    requestContactSync: async (from) => { signup.push(`sync:${from.phoneNumberId}`); return { requestId: "req-1" }; },
   };
-  return { client, sent, last: (to: string) => [...sent].reverse().find((s) => s.to === to) };
+  const signup: string[] = [];
+  return { client, sent, signup, last: (to: string) => [...sent].reverse().find((s) => s.to === to) };
 }
 
 // ---- payload builders

@@ -80,6 +80,8 @@ export function ReplyQueue() {
       </div>
       <div className="queue-foot">
         <Link to={`/b/${id}/inbox/${d.conversation_id}`}>See the whole conversation</Link>
+        <button className="link" disabled={a.busy} onClick={() => confirm(`Is ${d.name ?? "this person"} a friend or family, not a customer? Ignoring drops this reply and deletes what they said here. Your WhatsApp chat isn't touched.`)
+          && a.run(async () => { await post(`/businesses/${id}/conversations/${d.conversation_id}/ignore`); setNote(null); setSkip([...skip, d.id]); })}>Not a customer? Ignore</button>
         {list.length > 1 && <button className="link" onClick={() => { setSkip([...skip, d.id]); setNote(null); }}>Skip for now</button>}
         <button className="link" onClick={() => { setSkip([]); setDone(0); setNote(null); reload(); }}>Refresh</button>
       </div>

@@ -228,6 +228,42 @@ export function parseWhatsAppWebhook(body: any): WaInbound[] {
   return out;
 }
 
+/** A message the owner sent from the WhatsApp Business app on a shared ("coexistence") number. */
+export interface WaEcho { phoneNumberId: string; to: string; id: string; timestamp: string; type: string; text?: string }
+
+export function parseWhatsAppEchoes(body: any): WaEcho[] {
+  const out: WaEcho[] = [];
+  for (const entry of body?.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      if (change.field !== "smb_message_echoes") continue;
+      for (const e of change.value?.message_echoes ?? []) {
+        const to = normalisePhone(e.to);
+        if (!to || !e.id) continue;
+        out.push({ phoneNumberId: change.value.metadata?.phone_number_id, to, id: e.id, timestamp: e.timestamp, type: e.type, text: e.text?.body });
+      }
+    }
+  }
+  return out;
+}
+
+/** Contacts saved in the WhatsApp Business app, sent once after connecting and then as they change. */
+export interface WaSavedContact { phoneNumberId: string; phone: string; action: "add" | "remove" }
+
+export function parseWhatsAppContactSync(body: any): WaSavedContact[] {
+  const out: WaSavedContact[] = [];
+  for (const entry of body?.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      if (change.field !== "smb_app_state_sync") continue;
+      for (const s of change.value?.state_sync ?? []) {
+        const phone = normalisePhone(s.contact?.phone_number);
+        if (s.type !== "contact" || !phone) continue;
+        out.push({ phoneNumberId: change.value.metadata?.phone_number_id, phone, action: s.action === "remove" ? "remove" : "add" });
+      }
+    }
+  }
+  return out;
+}
+
 export function waToInbound(w: WaInbound): InboundMessage {
   return {
     channel: "whatsapp",

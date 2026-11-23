@@ -96,6 +96,6 @@ export async function sendOutbox(tenantId: string, draftId: string, attempt = 1,
 }
 
 export async function notifyOwners(db: any, text: string) {
-  for (const p of await approvers(db)) await clients.whatsapp.sendText(platformWaSender(), p.whatsapp_phone, text);
+  for (const p of await approvers(db)) await clients.whatsapp.sendText(platformWaSender()!, p.whatsapp_phone, text);
 }
 const first = (s: string) => (s || "the customer").split(/\s+/)[0];
