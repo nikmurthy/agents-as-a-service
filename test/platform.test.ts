@@ -59,6 +59,9 @@ let B: string; // another business, to prove isolation
 before(async () => {
   const pool = getPool();
   await pool.query("drop schema if exists graphile_worker cascade; drop schema if exists public cascade; create schema public;");
+  // Like Supabase: its API role gets every new table in public unless we take it away.
+  await pool.query("do $$ begin if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if; end $$");
+  await pool.query("grant usage on schema public to anon; alter default privileges in schema public grant all on tables to anon");
   await migrate(() => {});
   await syncAgents(() => {});
 
@@ -70,6 +73,13 @@ before(async () => {
 });
 
 after(async () => { await releaseQueue(); await closePool(); });
+
+test("every table is locked: Row-Level Security on, and Supabase's public API role can't touch any of them", async () => {
+  const open = (await getPool().query("select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relrowsecurity")).rows;
+  assert.deepEqual(open, [], "tables without Row-Level Security");
+  const granted = (await getPool().query("select table_name, privilege_type from information_schema.role_table_grants where grantee = 'anon' and table_schema = 'public'")).rows;
+  assert.deepEqual(granted, [], "tables the anon role can use");
+});
 
 test("owner connects Google through the signed link", async () => {
   const link = googleConnectLink(A);
