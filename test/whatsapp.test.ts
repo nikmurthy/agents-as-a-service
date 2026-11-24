@@ -189,6 +189,10 @@ test("owner answers a customer themselves in the app: our draft is dropped and i
 
   const items = await withTenant(A, (db) => feed(db, "Europe/London"));
   assert.ok(items.some((i) => i.text === "You answered Nia yourself in WhatsApp." && /dropped/.test(i.why ?? "")));
+  const pencilled = items.filter((i) => i.text.startsWith("Pencilled in") && i.text.endsWith("for Nia."));
+  assert.ok(pencilled.length > 0 && pencilled.every((i) => i.why === "Freed again: it's no longer needed."), "old lines say the times were freed");
+  assert.ok(!items.some((i) => /from Mate\b/.test(i.text)), "a personal chat isn't named in Activity");
+  assert.ok(items.some((i) => i.text.startsWith("A message was set aside")));
 });
 
 test("owner messaging a friend from the app is not recorded", async () => {

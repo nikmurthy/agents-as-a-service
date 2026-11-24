@@ -38,8 +38,9 @@ export async function feed(db: Db, tz: string, opts: { limit?: number; before?: 
        coalesce(m.name, case when a.actor like 'admin:%' then 'The platform team' end) as actor_name,
        d.kind as draft_kind, d.category, d.reply_route, d.auto_sent, d.conversation_id as draft_conv,
        coalesce(dc.name, hc.name, mc.name, cc.name) as customer,
-       h.start_at, h.expires_at, h.service, h.conversation_id as hold_conv,
+       h.start_at, h.expires_at, h.service, h.conversation_id as hold_conv, h.status as hold_status,
        msg.channel as msg_channel, msg.conversation_id as msg_conv,
+       exists(select 1 from runs rr where rr.message_id = msg.id and rr.outcome = 'ignored') as set_aside,
        au.state as auto_state, au.updated_at as auto_since,
        ar.state as cat_state, ar.updated_at as cat_since
      from audit_log a
@@ -59,6 +60,16 @@ export async function feed(db: Db, tz: string, opts: { limit?: number; before?: 
   return rows.map((r) => describe(r, tz)).filter((x): x is FeedItem => !!x);
 }
 
+/** What happened to a pencilled-in time since, so old lines don't promise something that's already changed. */
+function heldWhy(r: any, name: string, tz: string): string | undefined {
+  switch (r.hold_status) {
+    case "confirmed": return `${name} picked this time.`;
+    case "released": case "cancelled": return "Freed again: it's no longer needed.";
+    case "expired": return `Freed again: ${name} didn't pick it.`;
+    default: return r.expires_at ? `Released on ${shortWhen(r.expires_at, tz, false)} if ${name} doesn't pick it.` : undefined;
+  }
+}
+
 /** One audit row as a sentence. Unknown actions are left out rather than shown as jargon. */
 export function describe(r: any, tz: string): FeedItem | undefined {
   const base = { id: Number(r.id), at: new Date(r.at).toISOString() };
@@ -72,6 +83,8 @@ export function describe(r: any, tz: string): FeedItem | undefined {
 
   switch (r.action) {
     case "message.received":
+      // Personal chats and spam aren't customers: "A message was set aside" says it without naming them.
+      if (r.set_aside) return undefined;
       return item("customer", `New message from ${name} by ${CHANNEL[r.msg_channel] ?? CHANNEL[r.detail?.channel] ?? "message"}.`);
     case "run.escalated":
       return item("assistant", "A message needs you. It looked like a complaint, an emergency or a health question, so it's waiting for you and won't be sent automatically.");
@@ -80,8 +93,7 @@ export function describe(r: any, tz: string): FeedItem | undefined {
     case "run.skipped":
       return item("assistant", "A message was kept but not answered, because the business was paused or still being set up.");
     case "booking.held":
-      return item("assistant", `Pencilled in ${shortWhen(r.start_at, tz)} in your calendar for ${name}.`,
-        r.expires_at ? `Released on ${shortWhen(r.expires_at, tz, false)} if ${name} doesn't pick it.` : undefined);
+      return item("assistant", `Pencilled in ${shortWhen(r.start_at, tz)} in your calendar for ${name}.`, heldWhy(r, name, tz));
     case "booking.confirmed":
       return item("customer", `${name} picked ${shortWhen(r.start_at, tz)}. It's booked in your calendar, and the other times were released.`);
     case "booking.cancelled":
