@@ -256,6 +256,31 @@ test("owner writes their own reply in the Inbox: checked first, waiting draft dr
   assert.equal(await replyPlan(B, conv), undefined, "another business can't see or reply to it");
 });
 
+test("Meta accepts a reply, then can't deliver it: the Inbox says why instead of 'Sent'", async () => {
+  const KIT = "+447700900970";
+  await say(KIT, "Do you fit carpet on stairs?", "Kit");
+  await drain();
+  const conv = (await withTenant(A, (db) => one<{ conversation_id: string }>(db,
+    "select d.conversation_id from drafts d join conversations c on c.id = d.conversation_id join contact_identities i on i.contact_id = c.contact_id where i.value = $1", [KIT])))!.conversation_id;
+  await sendOwnerReply(A, { memberId: null, audit: "member:test" }, conv, "Yes, we do stairs.");
+  await drain();
+  const ob = (await withTenant(A, (db) => one<{ provider_message_id: string }>(db, "select provider_message_id from outbox where conversation_id = $1 and status = 'sent'", [conv])))!;
+  const outs = () => withTenant(A, (db) => many(db, "select id from messages where conversation_id = $1 and direction = 'out'", [conv]));
+  assert.equal((await outs()).length, 1);
+
+  const res = await postWhatsApp(meta("messages", { statuses: [{ id: ob.provider_message_id, status: "failed", timestamp: "1", recipient_id: KIT.slice(1),
+    errors: [{ code: 131030, title: "Recipient phone number not in allowed list" }] }] }));
+  assert.equal(res.status, 200);
+  const after = await withTenant(A, (db) => one<any>(db, "select o.status, o.error, d.status as draft from outbox o join drafts d on d.id = o.draft_id where o.provider_message_id = $1", [ob.provider_message_id]));
+  assert.equal(after.status, "failed");
+  assert.equal(after.draft, "failed");
+  assert.match(after.error, /allowed recipients/);
+  assert.equal((await outs()).length, 0, "it's no longer shown as sent");
+
+  // Another business's message IDs are untouched.
+  await postWhatsApp(meta("messages", { statuses: [{ id: "wamid.unknown", status: "failed", errors: [{ code: 131026 }] }] }));
+});
+
 async function setPeople(people: string) {
   await withTenant(A, (db) => db.query("update tenants set settings = settings || $1::jsonb where id = app_current_tenant()", [{ whatsappPeople: people }]));
 }
