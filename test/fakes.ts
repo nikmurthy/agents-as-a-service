@@ -44,7 +44,10 @@ export function fakeWhatsApp() {
     exchangeSignupCode: async (code) => { signup.push(`exchange:${code}`); return { accessToken: `biz-token-${code}` }; },
     subscribeApp: async (wabaId, token) => { signup.push(`subscribe:${wabaId}:${token}`); },
     accountNumbers: async () => ["BIZ_APP_NUMBER"],
-    numberInfo: async (from) => ({ displayPhone: "+44 7700 900777", verifiedName: "Sole Trader", onBusinessApp: from.phoneNumberId !== "NOT_ON_APP" }),
+    numberInfo: async (from) => {
+      if (from.phoneNumberId.startsWith("999")) throw new Error("Meta 400: Unsupported get request");
+      return ({ displayPhone: "+44 7700 900777", verifiedName: "Sole Trader", onBusinessApp: from.phoneNumberId !== "NOT_ON_APP" });
+    },
     requestContactSync: async (from) => { signup.push(`sync:${from.phoneNumberId}`); return { requestId: "req-1" }; },
   };
   const signup: string[] = [];
