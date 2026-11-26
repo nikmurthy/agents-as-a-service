@@ -129,13 +129,18 @@ test("one business can't see or change another", async () => {
 });
 
 test("connecting a number by ID: Meta is asked first, so a wrong ID is refused with a reason", async () => {
-  const bad = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "999111222333", accessToken: "tokentokentoken" });
+  const bad = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "999111222333", wabaId: "200000000000001", accessToken: "tokentokentoken" });
   assert.equal(bad.status, 400);
   assert.match(bad.json.error ?? bad.json.message ?? JSON.stringify(bad.json), /Phone number ID/);
-  assert.equal((await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "+1 555 123 4567", accessToken: "tokentokentoken" })).status, 400, "a phone number isn't an ID");
-  const ok = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "106540352242922", accessToken: "tokentokentoken" });
+  assert.equal((await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "+1 555 123 4567", wabaId: "200000000000001", accessToken: "tokentokentoken" })).status, 400, "a phone number isn't an ID");
+  const noSub = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "106540352242922", wabaId: "999000000000001", accessToken: "tokentokentoken" });
+  assert.equal(noSub.status, 400, "refused if Meta won't subscribe the account: messages would never arrive");
+  assert.match(JSON.stringify(noSub.json), /Business Account ID/);
+  assert.equal((await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "106540352242922", accessToken: "tokentokentoken" })).status, 400, "account ID is needed");
+  const ok = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "106540352242922", wabaId: "200000000000001", accessToken: "tokentokentoken" });
   assert.equal(ok.status, 200);
   assert.equal(ok.json.display, "+44 7700 900777");
+  assert.ok(wa.signup.includes("subscribe:200000000000001:tokentokentoken"), "the account is subscribed to the app");
   const conn = await withTenant(A, (db) => one(db, "select label from channel_connections where external_id = '106540352242922'"));
   assert.equal(conn?.label, "+44 7700 900777");
 });
@@ -145,7 +150,7 @@ test("staff can look and decide on replies but not change settings or people", a
   const s = (await api("ownerA", "GET", `/businesses/${A}/settings`)).json.settings;
   assert.equal((await api("staffA", "PUT", `/businesses/${A}/settings`, { settings: s })).status, 403);
   assert.equal((await api("staffA", "POST", `/businesses/${A}/members`, { name: "X", role: "owner", isApprover: false })).status, 403);
-  assert.equal((await api("staffA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "12345678", accessToken: "tokentokentoken" })).status, 403);
+  assert.equal((await api("staffA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "12345678", wabaId: "12345678", accessToken: "tokentokentoken" })).status, 403);
   assert.equal((await api("staffA", "PUT", `/businesses/${A}/status`, { status: "paused" })).status, 403);
   const hooks = (await api("staffA", "GET", `/businesses/${A}/connections`)).json.connections;
   assert.ok(hooks.every((c: any) => c.url === undefined), "staff don't get webhook URLs");
@@ -317,7 +322,7 @@ test("the setup checklist shows what a business still needs, scoped to that busi
 });
 
 test("a replaced WhatsApp token is stored encrypted and never returned", async () => {
-  const r = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "99887766", accessToken: "brand-new-secret-token" });
+  const r = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "99887766", wabaId: "200000000000002", accessToken: "brand-new-secret-token" });
   assert.equal(r.status, 200);
   const row = await withTenant(A, (db) => one<any>(db, "select secret_ciphertext from channel_connections where external_id = '99887766'"));
   assert.ok(row.secret_ciphertext && !row.secret_ciphertext.includes("brand-new-secret-token"));
@@ -327,7 +332,7 @@ test("a replaced WhatsApp token is stored encrypted and never returned", async (
     assert.ok(!text.includes("brand-new-secret-token") && !text.includes("secret_ciphertext") && !text.includes(row.secret_ciphertext), path);
   }
   assert.equal((await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "abc", accessToken: "x" })).status, 400);
-  assert.equal((await api("ownerB", "POST", `/businesses/${B}/connections/whatsapp`, { phoneNumberId: "99887766", accessToken: "stolen-number-token" })).status, 409);
+  assert.equal((await api("ownerB", "POST", `/businesses/${B}/connections/whatsapp`, { phoneNumberId: "99887766", wabaId: "200000000000003", accessToken: "stolen-number-token" })).status, 409);
 });
 
 test("webhook links are created and shown to owners", async () => {

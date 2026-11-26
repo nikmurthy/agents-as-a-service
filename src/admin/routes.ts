@@ -403,8 +403,9 @@ admin.get("/businesses/:id/connections/google-link", (c) => {
 
 admin.post("/businesses/:id/connections/whatsapp", async (c) => {
   const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
-  const { phoneNumberId, accessToken } = await parse(c, z.object({
+  const { phoneNumberId, wabaId, accessToken } = await parse(c, z.object({
     phoneNumberId: z.string().trim().regex(/^\d{5,30}$/, "The Phone number ID is a long number from Meta, with no + or spaces"),
+    wabaId: z.string().trim().regex(/^\d{5,30}$/, "The WhatsApp Business Account ID is a long number from Meta, with no + or spaces"),
     accessToken: z.string().trim().min(10).max(2000),
   }));
   // Ask Meta before saving: a phone number or the account ID pasted here would otherwise connect and then silently get nothing.
@@ -415,6 +416,13 @@ admin.post("/businesses/:id/connections/whatsapp", async (c) => {
     console.warn("WhatsApp connect check failed:", String(e?.message ?? e).slice(0, 200));
   }
   if (!display) throw new HTTPException(400, { message: "Meta doesn't know that as a Phone number ID for this token. In Meta, open WhatsApp → API Setup and copy the \"Phone number ID\" shown under the number (not the phone number or the account ID), and check the token is for the same app." });
+  // Meta only sends a number's messages to apps its WhatsApp account is subscribed to; new test accounts often aren't.
+  try {
+    await clients.whatsapp.subscribeApp(wabaId, accessToken);
+  } catch (e: any) {
+    console.warn("WhatsApp subscribe failed:", String(e?.message ?? e).slice(0, 200));
+    throw new HTTPException(400, { message: "Meta wouldn't link that WhatsApp Business Account to the app, so messages wouldn't arrive. In Meta, WhatsApp → API Setup: copy the \"WhatsApp Business Account ID\", and check the token has whatsapp_business_management and is for the same app." });
+  }
   try {
     await connectWhatsApp(tenantId, phoneNumberId, accessToken, actor.audit, display);
   } catch (e: any) {

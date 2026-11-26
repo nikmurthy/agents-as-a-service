@@ -42,7 +42,10 @@ export function fakeWhatsApp() {
     sendButtons: async (from, to, body, buttons) => { sent.push({ kind: "buttons", from: from.phoneNumberId, to, text: body, buttons: buttons.map((b) => b.id) }); return { id: `wamid.${++n}` }; },
     sendTemplate: async (from, to, _name, _lang, params, payloads) => { sent.push({ kind: "template", from: from.phoneNumberId, to, text: params.join(" | "), buttons: payloads }); return { id: `wamid.${++n}` }; },
     exchangeSignupCode: async (code) => { signup.push(`exchange:${code}`); return { accessToken: `biz-token-${code}` }; },
-    subscribeApp: async (wabaId, token) => { signup.push(`subscribe:${wabaId}:${token}`); },
+    subscribeApp: async (wabaId, token) => {
+      if (wabaId.startsWith("999")) throw new Error("Meta 400: Unsupported post request");
+      signup.push(`subscribe:${wabaId}:${token}`);
+    },
     accountNumbers: async () => ["BIZ_APP_NUMBER"],
     numberInfo: async (from) => {
       if (from.phoneNumberId.startsWith("999")) throw new Error("Meta 400: Unsupported get request");
