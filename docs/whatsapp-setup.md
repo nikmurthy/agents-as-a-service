@@ -34,7 +34,7 @@ You need: your phone with WhatsApp, a Facebook login, and Bitwarden.
    - **Verify and save**. Then under **Webhook fields**, subscribe to **messages**.
 
 ### A3. Connect the test number to Test Business
-In the admin app: **Test Business → Connections → Connect a number by its ID**. Paste the **Phone number ID** from A1.2 (a long number such as `106540352242922`, shown under the number on API Setup; not the phone number itself, and not the WhatsApp Business Account ID) and the token from A1.4. The app checks both with Meta and shows the number it found, for example "Connected +1 555 123 4567". (Then delete the token from your Bitwarden note: the app has it encrypted and never shows it again.)
+In the admin app: **Test Business → Connections → Connect a number by its ID**. Paste the **Phone number ID** from A1.2 (a long number such as `106540352242922`, shown under the number on API Setup; not the phone number itself, and not the WhatsApp Business Account ID), the **WhatsApp Business Account ID** (the other long number on the same page) and the token from A1.4. The app checks them with Meta, links the account to your app so its messages are sent here, and shows the number it found, for example "Connected +1 555 123 4567". (Then delete the token from your Bitwarden note: the app has it encrypted and never shows it again.)
 
 ### A4. Try it
 1. From your phone, message the test number as a customer: "Hi, could you quote for a new kitchen floor next week?"

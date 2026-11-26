@@ -98,20 +98,22 @@ function WhoToAnswer({ id, value, onDone }: { id: string; value: string; onDone:
 function WhatsApp({ id, onDone }: { id: string; onDone: () => void }) {
   const [phoneNumberId, setP] = useState("");
   const [accessToken, setT] = useState("");
+  const [wabaId, setW] = useState("");
   const { busy, error, run } = useAction();
   const [connected, setConnected] = useState<string>();
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setConnected(undefined);
     run(async () => {
-      const r = await post<{ display?: string }>(`/businesses/${id}/connections/whatsapp`, { phoneNumberId, accessToken });
-      setP(""); setT(""); setConnected(r?.display ?? "the number"); onDone();
+      const r = await post<{ display?: string }>(`/businesses/${id}/connections/whatsapp`, { phoneNumberId, wabaId, accessToken });
+      setP(""); setW(""); setT(""); setConnected(r?.display ?? "the number"); onDone();
     });
   };
   return (
     <Card title="Connect a number by its ID (Meta test numbers)">
       <form onSubmit={submit}>
         <Field label="Phone number ID" hint="In Meta: WhatsApp → API Setup, under the number. A long number, not the phone number itself."><input required inputMode="numeric" value={phoneNumberId} onChange={(e) => setP(e.target.value)} /></Field>
+        <Field label="WhatsApp Business Account ID" hint="Same page, the other long number. Used to ask Meta to send this number's messages here."><input required inputMode="numeric" value={wabaId} onChange={(e) => setW(e.target.value)} /></Field>
         <Field label="Access token" hint="Stored encrypted. It can't be viewed again once saved; paste a new one to replace it."><input required type="password" autoComplete="off" value={accessToken} onChange={(e) => setT(e.target.value)} /></Field>
         <ErrorNote message={error} />
         {connected && <p className="note good" role="status">Connected {connected}. Messages to it now come here.</p>}
