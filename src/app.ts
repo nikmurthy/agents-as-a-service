@@ -31,7 +31,11 @@ app.get("/webhooks/whatsapp", (c) => {
 app.post("/webhooks/whatsapp", async (c) => {
   const raw = await c.req.text();
   const sig = c.req.header("x-hub-signature-256");
-  if (!env.waAppSecrets.some((secret) => verifyMetaSignature(raw, sig, secret))) return c.text("Invalid signature", 401);
+  if (!env.waAppSecrets.some((secret) => verifyMetaSignature(raw, sig, secret))) {
+    // Usually WA_APP_SECRET is from a different Meta app than the one sending. Never log the body or the secret.
+    console.warn("WhatsApp webhook refused: signature doesn't match WA_APP_SECRET or PLATFORM_WA_APP_SECRET", sig ? "" : "(no signature)");
+    return c.text("Invalid signature", 401);
+  }
   const body = JSON.parse(raw);
   for (const w of parseWhatsAppWebhook(body)) {
     if (env.hasPlatformWa && w.phoneNumberId === env.platformWaPhoneNumberId) {
@@ -39,6 +43,8 @@ app.post("/webhooks/whatsapp", async (c) => {
       continue;
     }
     const n = await businessForNumber(w.phoneNumberId);
+    // The Phone number ID isn't connected to any business (often the account ID was pasted instead). Not personal data.
+    if (!n) console.warn("WhatsApp message for a number no business has connected: Phone number ID", w.phoneNumberId);
     // A customer messaging a business. On a sole trader's one shared number, personal chats are left alone.
     if (n && (await isForTheBusiness(n, w.from))) await ingest(n.tenantId, waToInbound(w));
   }
