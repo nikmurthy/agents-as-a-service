@@ -12,8 +12,6 @@ process.env.SIGNING_SECRET = "test-signing-secret";
 process.env.AGENT_MODE = "mock";
 process.env.WA_APP_SECRET = "test-app-secret";
 process.env.WA_VERIFY_TOKEN = "verify-me";
-process.env.PLATFORM_WA_PHONE_NUMBER_ID = "PLATFORM";
-process.env.PLATFORM_WA_TOKEN = "platform-token";
 process.env.GOOGLE_CLIENT_ID = "gid";
 process.env.GOOGLE_CLIENT_SECRET = "gsecret";
 process.env.PUBLIC_BASE_URL = "https://platform.example";
@@ -28,7 +26,6 @@ const { app } = await import("../src/app.js");
 const { taskList } = await import("../src/jobs/tasks.js");
 const { releaseQueue } = await import("../src/jobs/queue.js");
 const { tenantSettingsSchema } = await import("../src/settings-schema.js");
-const { sendWeeklySummaries, weeklyText } = await import("../src/workflows/weekly-summary.js");
 const { runOnce, Logger } = await import("graphile-worker");
 const { fakeGoogle, fakeWhatsApp } = await import("./fakes.js");
 
@@ -112,7 +109,7 @@ test("signing in links a person to their business by email and shows only their 
   assert.equal(me.json.isAdmin, false);
   assert.equal((await api("stranger", "GET", "/me")).json.businesses.length, 0);
   assert.equal((await api("ownerA", "GET", "/businesses")).json.businesses.length, 1);
-  assert.equal((await api("ownerA", "POST", "/businesses", { slug: "new-one", name: "New", pack: "trades", owner: { name: "X", whatsapp: "07700900003" } })).status, 403);
+  assert.equal((await api("ownerA", "POST", "/businesses", { slug: "new-one", name: "New", pack: "trades", owner: { name: "X", email: "x@new.example" } })).status, 403);
 });
 
 test("one business can't see or change another", async () => {
@@ -182,7 +179,7 @@ test("owner edits settings; invalid settings are refused with a clear reason; un
   assert.equal(log.detail.previous.signOff, cur.settings.signOff, "the previous version is kept in the audit log");
 });
 
-test("web approval behaves like WhatsApp approval, and a second tap does nothing", async () => {
+test("approving in the Inbox sends once, and a second tap does nothing", async () => {
   const { draftId } = await makeDraft(A);
   const first = await api("ownerA", "POST", `/businesses/${A}/drafts/${draftId}/approve`);
   assert.equal(first.status, 200);
@@ -254,9 +251,9 @@ test("a platform admin sees every business, but only after two-factor", async ()
   assert.equal((await api("admin", "GET", `/businesses/${B}`, undefined, "aal2")).status, 200);
   assert.equal((await api("admin", "GET", "/agents", undefined, "aal2")).status, 200);
 
-  const made = await api("admin", "POST", "/businesses", { slug: "fresh-biz", name: "Fresh", pack: "practitioner", owner: { name: "Pat", whatsapp: "07700 900009" } }, "aal2");
+  const made = await api("admin", "POST", "/businesses", { slug: "fresh-biz", name: "Fresh", pack: "practitioner", owner: { name: "Pat", email: "pat@fresh.example" } }, "aal2");
   assert.equal(made.status, 201);
-  assert.equal((await api("admin", "POST", "/businesses", { slug: "fresh-biz", name: "Fresh", pack: "practitioner", owner: { name: "Pat", whatsapp: "07700 900009" } }, "aal2")).status, 409);
+  assert.equal((await api("admin", "POST", "/businesses", { slug: "fresh-biz", name: "Fresh", pack: "practitioner", owner: { name: "Pat", email: "pat@fresh.example" } }, "aal2")).status, 409);
   assert.equal((await api("admin", "POST", "/businesses", { slug: "x", name: "Bad", pack: "nope", owner: { name: "P", whatsapp: "1" } }, "aal2")).status, 400);
   const audited = await withAdmin((db) => one<any>(db, "select actor from audit_log where action = 'tenant.created' and tenant_id = $1", [made.json.id]));
   assert.equal(audited.actor, `admin:${USERS.admin.email}`);
@@ -310,11 +307,11 @@ test("the setup checklist shows what a business still needs, scoped to that busi
   assert.equal(r.status, 200);
   const step = (k: string) => r.json.steps.find((x: any) => x.key === k);
   assert.equal(step("claude").done, false);
-  assert.equal(step("approver").done, true);
+  assert.equal(step("approver"), undefined, "no WhatsApp approver to set up: replies are approved here");
   assert.equal(r.json.complete, false);
   // A task list: switching on can't start until the required steps are done; optional ones don't block it.
   assert.equal(step("claude").status, "todo");
-  assert.equal(step("approver").status, "done");
+  assert.equal(step("details").status, step("details").done ? "done" : "todo");
   assert.equal(step("active").status, step("active").done ? "done" : "blocked");
   assert.equal(step("reply").optional, true);
   assert.ok(r.json.needs.includes("A reply or two you've sent"), "what you'll need, from the steps still to do");
@@ -464,36 +461,23 @@ test("try it: a pretend message goes through the flow and nothing is saved, held
   assert.equal((await api("ownerA", "POST", `/businesses/${A}/flows/try`, { message: "" })).status, 400);
 });
 
-test("this week: counts on Overview, and a Friday WhatsApp summary only for owners who ask", async () => {
+test("this week: counts on Overview, and the Inbox says how many customers need you", async () => {
   const o = (await api("staffA", "GET", `/businesses/${A}`)).json;
   assert.equal(typeof o.week.repliesSent, "number");
-  assert.equal(o.weeklySummary, false);
-  assert.equal(weeklyText("X", { messagesIn: 0, repliesSent: 0, avgMinutesToReply: null, booked: 0, quotesChased: 0, feedbackAsked: 0, sentAutomatically: 0 }), undefined, "no empty summaries");
-  assert.equal((await api("staffA", "PUT", `/businesses/${A}/weekly-summary`, { on: true })).status, 403);
-
-  let i = wa.sent.length;
-  await sendWeeklySummaries();
-  assert.ok(!wa.sent.slice(i).some((m) => /your week/.test(m.text ?? "")), "off by default");
-
-  assert.equal((await api("ownerA", "PUT", `/businesses/${A}/weekly-summary`, { on: true })).status, 200);
-  assert.equal((await api("ownerA", "GET", `/businesses/${A}`)).json.weeklySummary, true);
-  i = wa.sent.length;
-  await sendWeeklySummaries();
-  const msg = wa.sent.slice(i).find((m) => /your week/.test(m.text ?? ""));
-  assert.ok(msg, "sent to the owner");
-  assert.equal(msg!.to, "+447700900001");
-  assert.match(msg!.text!, /repl(y|ies) sent/);
-  assert.ok(!wa.sent.slice(i).some((m) => m.to === "+447700900002"), "not to another business");
-  await api("ownerA", "PUT", `/businesses/${A}/weekly-summary`, { on: false });
+  assert.equal(o.weeklySummary, undefined, "no WhatsApp summary any more");
+  const needs = async (who: "ownerA" | "ownerB", id: string) => (await api(who, "GET", `/businesses/${id}/conversations`)).json.needsYou;
+  const [a, b] = [await needs("ownerA", A), await needs("ownerB", B)];
+  await makeDraft(A);
+  assert.equal(await needs("ownerA", A), a + 1);
+  assert.equal(await needs("ownerB", B), b, "only this business's");
 });
 
-test("people: the last owner can't be removed or demoted; approvers need a WhatsApp number", async () => {
+test("people: the last owner can't be removed or demoted; no WhatsApp number needed", async () => {
   const members = (await api("ownerA", "GET", `/businesses/${A}/members`)).json.members;
   const owner = members.find((m: any) => m.role === "owner");
   assert.equal((await api("ownerA", "DELETE", `/businesses/${A}/members/${owner.id}`)).status, 409);
   assert.equal((await api("ownerA", "PUT", `/businesses/${A}/members/${owner.id}`, { name: "Mark", email: USERS.ownerA.email, role: "staff", whatsapp: "07700 900001", isApprover: true })).status, 409);
-  assert.equal((await api("ownerA", "POST", `/businesses/${A}/members`, { name: "Kim", role: "staff", isApprover: true })).status, 400);
-  const added = await api("ownerA", "POST", `/businesses/${A}/members`, { name: "Kim", email: "kim@a.example", role: "owner", whatsapp: "07700 900044", isApprover: true });
+  const added = await api("ownerA", "POST", `/businesses/${A}/members`, { name: "Kim", email: "kim@a.example", role: "owner" });
   assert.equal(added.status, 201);
   assert.equal((await api("ownerA", "POST", `/businesses/${A}/members`, { name: "Kim 2", email: "KIM@a.example", role: "staff", isApprover: false })).status, 409);
   assert.equal((await api("ownerA", "DELETE", `/businesses/${A}/members/${added.json.id}`)).status, 200);

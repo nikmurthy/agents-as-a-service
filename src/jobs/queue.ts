@@ -10,7 +10,7 @@ export async function queue(): Promise<WorkerUtils> {
 }
 export async function releaseQueue() { await utils?.release(); utils = undefined; }
 
-export type JobName = "process_inbound" | "send_approval" | "send_outbox" | "notify_owner";
+export type JobName = "process_inbound" | "send_outbox";
 
 export async function enqueue(name: JobName, payload: Record<string, unknown>, opts: { jobKey?: string; maxAttempts?: number } = {}) {
   const q = await queue();

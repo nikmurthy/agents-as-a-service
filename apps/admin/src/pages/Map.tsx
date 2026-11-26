@@ -86,7 +86,7 @@ const COLUMNS: { title: string; sub: string; flow?: boolean; layers: Layer[] }[]
     layers: [
       { title: "Inbound channels", chips: [
         { name: "Email", sub: "Gmail, Outlook", kind: "ready", live: (d) => { const [s, t] = conn("gmail", "Gmail inbox")(d); return [s, `${t}. Outlook not built yet`]; } },
-        { name: "WhatsApp", sub: "Own number, coexistence", kind: "ready", live: (d) => !d.keys.whatsapp ? ["built", "Built. Waiting for the platform's WhatsApp keys"] : conn("whatsapp", "number")(d) },
+        { name: "WhatsApp", sub: "Own number, coexistence", kind: "ready", live: (d) => !d.keys.whatsapp ? ["built", "Built. Waiting for the WhatsApp webhook keys"] : conn("whatsapp", "number")(d) },
         { name: "Web forms", sub: "Wix, Shopify", kind: "ready", live: conn("web_form", "form") },
         { name: "Social DMs", sub: "Instagram, Facebook", kind: "ready", live: todo() },
         { name: "SMS", sub: "Texts read from Messages on the business's Mac", kind: "limited", tag: "New",
@@ -190,14 +190,13 @@ const COLUMNS: { title: string; sub: string; flow?: boolean; layers: Layer[] }[]
         { name: "Learner progress", sub: "Curricula, what's covered, what's due", kind: "later", live: later() },
       ] },
       { title: "Human review interface", serves: "the unified inbox and spot checks", chips: [
-        { name: "Owner's WhatsApp", sub: "Each draft arrives as a WhatsApp message with Approve, Edit and Reject buttons", kind: "core", tag: "Added", wide: true,
-          more: ["The platform's own WhatsApp number sends the owner each draft: who it's from, what they asked, and the reply we'd send.",
+        { name: "The Inbox", sub: "Each draft waits here with Approve, Edit and Reject, the reason it was flagged, and a Needs you count", kind: "core", tag: "Added", wide: true,
+          more: ["Owners are never messaged on WhatsApp by the platform. They check the Inbox; what's sent from their number also shows in their WhatsApp Business app.",
             "Approve sends it through the customer's own channel. Edit lets the owner change the wording first. Reject drops it.",
             "Anything flagged (clinical, complaints, emergencies) arrives with a warning at the top.",
-            "Nothing reaches a customer without a yes. The Inbox page here does the same job from a browser."],
-          live: ({ keys, counts: c }) => !keys.whatsapp ? ["built", "Built. Waiting for the platform's WhatsApp keys; the Inbox page works meanwhile"]
-            : c.approvers ? ["live", `${plural(c.approvers, "approver")} on WhatsApp`] : ["built", "Keys set. No approver has a WhatsApp number yet"] },
-        { name: "Chatwoot, self-hosted", sub: "One inbox per client; drafts appear as notes to approve", kind: "later", wide: true, live: ({ keys }) => ["different", keys.whatsapp ? "Drafts go to the owner on WhatsApp and to the Inbox page here" : "Inbox page here. WhatsApp approvals once the keys are in"] },
+            "Nothing reaches a customer without a yes, unless the owner chose to automate that kind of reply."],
+          live: () => ["live", "In this app"] },
+        { name: "Chatwoot, self-hosted", sub: "One inbox per client; drafts appear as notes to approve", kind: "later", wide: true, live: () => ["different", "Not needed: the Inbox page here does this"] },
       ] },
       { title: "Observability and quality", serves: "the reviewer agent and audit", chips: [
         { name: "Tracing every run", sub: "Inputs, tool calls, outputs, cost (e.g. Langfuse)", kind: "infra", live: () => ["different", "Our own: each run's steps, tokens and timings in Activity"] },
@@ -244,7 +243,7 @@ export function WorkforceMap() {
     { cls: "ready", title: "Lead arrives", body: "Gmail, WhatsApp, texts, web form, Checkatrade", stat: sum(c.messagesIn), unit: "messages" },
     { cls: "core", title: "Agents read it", body: "Triage with the pack and the business's own prices", stat: sum(c.runs), unit: "handled" },
     { cls: "ready", title: "Checks the diary", body: "Free times from Google Calendar, held", stat: sum(c.holds), unit: "times offered" },
-    { cls: "core", title: "Draft to the owner", body: "On WhatsApp, or the Inbox here", stat: sum(c.drafts), unit: "drafts" },
+    { cls: "core", title: "Draft to the owner", body: "In the Inbox here", stat: sum(c.drafts), unit: "drafts" },
     { cls: "core", title: "Owner taps yes", body: "Or edits, or rejects", stat: n(c.drafts, "sent", "approved"), unit: `approved${c.edited ? `, ${c.edited} edited` : ""}` },
     { cls: "ready", title: "Sent and booked", body: "Same channel; calendar updated", stat: n(c.drafts, "sent"), unit: `sent, ${n(c.holds, "confirmed")} booked` },
   ];

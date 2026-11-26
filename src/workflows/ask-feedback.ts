@@ -35,7 +35,7 @@ export async function askAllFeedback(): Promise<void> {
 }
 
 export async function askFeedback(tenantId: string, now = new Date()): Promise<number> {
-  const next: NextStep[] = [];
+  const next: (NextStep | undefined)[] = [];
   const made = await withTenant(tenantId, async (db) => {
     if (!(await useCaseEnabled(db, "ask_feedback"))) return 0;
     const cfg = (await one<{ config: FeedbackConfig }>(db, "select config from tenant_use_cases where use_case = 'ask_feedback'"))?.config ?? {};

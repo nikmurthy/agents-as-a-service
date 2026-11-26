@@ -65,7 +65,7 @@ function WhatsAppBusiness({ id, ready }: { id: string; ready: boolean }) {
       <ul className="muted small">
         <li>People saved in your phone are left alone, unless they're already customers.</li>
         <li>If you answer a customer yourself in the app, the reply waiting here is dropped, so nobody gets two.</li>
-        <li>Approval requests come from our number as a separate chat, or you approve in this app.</li>
+        <li>Replies waiting for you are in this app's Inbox. Everything sent from your number also shows in the WhatsApp Business app.</li>
       </ul>
       {ready ? (<>
         <p className="muted">Make a one-time link for the owner. They sign in to Facebook in Meta's own window; we never see their password.</p>

@@ -8,7 +8,7 @@ const HELP = `
 Onboard and manage businesses.
 
   npm run prod:tenant -- create --slug marks-flooring --name "Mark's Flooring" --pack flooring \\
-       --owner "Mark Jones" --owner-whatsapp 07700900123 [--owner-email mark@example.com] \\
+       --owner "Mark Jones" --owner-email mark@example.com \\
        [--use-cases answer_enquiries,book_appointments]
   npm run prod:tenant -- google-link --slug marks-flooring          New link for the owner to connect Gmail + Calendar
   read -s TENANT_WA_TOKEN && export TENANT_WA_TOKEN       (paste the token; kept out of shell history)
@@ -34,7 +34,7 @@ try {
     case "create": {
       const r = await createTenant({
         slug: a.slug!, name: a.name!, pack: a.pack!,
-        owner: { name: a.owner!, whatsapp: a["owner-whatsapp"]!, email: a["owner-email"] },
+        owner: { name: a.owner!, email: a["owner-email"], whatsapp: a["owner-whatsapp"] },
         useCases: a["use-cases"]?.split(","),
       });
       console.log(`Created ${a.name} (${r.id}).
@@ -42,7 +42,7 @@ try {
 Next steps:
 1. Send the owner this link to connect Gmail and Google Calendar (valid 7 days):
    ${r.googleLink}
-2. Ask the owner to send any message to the platform WhatsApp number, so approvals arrive as buttons straight away.
+2. They approve replies in the admin app (Inbox), signing in with their email.
 3. Connect their WhatsApp number:  read -s TENANT_WA_TOKEN && export TENANT_WA_TOKEN, then npm run prod:tenant -- whatsapp --slug ${a.slug} --phone-number-id ...
 4. Add website form / Checkatrade webhooks if they have them:  add-form, add-checkatrade-webhook
 5. Check the settings (prices, hours, area) in the tenants table, then:  npm run prod:tenant -- activate --slug ${a.slug}`);
@@ -66,7 +66,7 @@ Next steps:
         console.log(`${t.name} – ${t.status}`);
         console.table(await many(db, "select kind, external_id, status, last_error from channel_connections order by kind"));
         console.table(await many(db, "select use_case, enabled from tenant_use_cases"));
-        console.table(await many(db, "select name, whatsapp_phone, is_approver from tenant_members"));
+        console.table(await many(db, "select name, email, role from tenant_members"));
         console.table(await many(db, "select status, count(*)::int from drafts group by status"));
       });
       break;

@@ -17,18 +17,17 @@ export function packTemplate(pack: string): { settings: TenantSettings; useCases
 
 export interface NewTenant {
   slug: string; name: string; pack: string;
-  owner: { name: string; whatsapp: string; email?: string };
+  owner: { name: string; email?: string; whatsapp?: string };
   useCases?: string[];
   settings?: Partial<TenantSettings>;
   by?: string;                         // audit actor, default "admin"
 }
 
-/** Creates a business from its sector template, with the owner as approver. Returns the next-step links. */
+/** Creates a business from its sector template, with its owner. Returns the next-step links. */
 export async function createTenant(t: NewTenant) {
   const tpl = packTemplate(t.pack);
   const settings = { ...tpl.settings, ...t.settings };
-  const phone = normalisePhone(t.owner.whatsapp);
-  if (!phone) throw new Error("Owner WhatsApp number is required");
+  const phone = t.owner.whatsapp ? normalisePhone(t.owner.whatsapp) : undefined;
   const tenant = await withAdmin(async (db) => {
     const row = await one<{ id: string }>(db, "insert into tenants (slug, name, pack, settings) values ($1, $2, $3, $4) returning id", [t.slug, t.name, t.pack, settings]);
     await audit(db, { tenantId: row!.id, actor: t.by ?? "admin", action: "tenant.created", detail: { pack: t.pack } });
@@ -36,7 +35,7 @@ export async function createTenant(t: NewTenant) {
   });
   await withTenant(tenant.id, async (db) => {
     await db.query("insert into tenant_members (tenant_id, name, role, email, whatsapp_phone) values (app_current_tenant(), $1, 'owner', $2, $3)",
-      [t.owner.name, t.owner.email ?? null, phone]);
+      [t.owner.name, t.owner.email ?? null, phone ?? null]);
     for (const u of t.useCases ?? tpl.useCases) {
       await db.query("insert into tenant_use_cases (tenant_id, use_case) values (app_current_tenant(), $1)", [u]);
     }

@@ -21,22 +21,14 @@ export const env = {
   // Meta / WhatsApp Cloud API
   get graphApiVersion() { return opt("GRAPH_API_VERSION", "v21.0"); },
   get waAppSecret() { return req("WA_APP_SECRET"); },          // verifies webhook signatures
-  /** Optional: a second Meta app's secret, when the platform number lives in a different app (e.g. two test apps). */
+  /** Optional: a second Meta app's secret, for webhooks from a second Meta app (e.g. a test app). */
   get waAppSecrets() { return [req("WA_APP_SECRET"), opt("PLATFORM_WA_APP_SECRET")].filter(Boolean); },
   get waVerifyToken() { return req("WA_VERIFY_TOKEN"); },      // webhook subscription handshake
-  // The platform's own WhatsApp number, used to send approval requests to business owners. Optional:
-  // without it, owners approve in the admin app and customer WhatsApp still works.
-  get platformWaPhoneNumberId() { return opt("PLATFORM_WA_PHONE_NUMBER_ID"); },
-  get platformWaToken() { return opt("PLATFORM_WA_TOKEN"); },
-  get hasPlatformWa() { return !!process.env.PLATFORM_WA_PHONE_NUMBER_ID && !!process.env.PLATFORM_WA_TOKEN; },
   // Embedded Signup: lets a business connect the number they already use in the WhatsApp Business app.
   // Needs Meta Tech Provider status. META_APP_SECRET defaults to WA_APP_SECRET (same Meta app).
   get metaAppId() { return opt("META_APP_ID"); },
   get metaAppSecret() { return opt("META_APP_SECRET") || opt("WA_APP_SECRET"); },
   get metaSignupConfigId() { return opt("META_SIGNUP_CONFIG_ID"); },
-  /** Pre-approved utility template used when an owner hasn't messaged in 24h. Params: business, customer, summary. */
-  get approvalTemplateName() { return opt("APPROVAL_TEMPLATE_NAME", "draft_ready_for_approval"); },
-  get approvalTemplateLang() { return opt("APPROVAL_TEMPLATE_LANG", "en_GB"); },
 
   // Google (Gmail + Calendar)
   get googleClientId() { return req("GOOGLE_CLIENT_ID"); },

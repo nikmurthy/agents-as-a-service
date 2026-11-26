@@ -11,8 +11,6 @@ process.env.SIGNING_SECRET = "test-signing-secret";
 process.env.AGENT_MODE = "mock";
 process.env.WA_APP_SECRET = "test-app-secret";
 process.env.WA_VERIFY_TOKEN = "verify-me";
-process.env.PLATFORM_WA_PHONE_NUMBER_ID = "PLATFORM";
-process.env.PLATFORM_WA_TOKEN = "platform-token";
 process.env.GOOGLE_CLIENT_ID = "gid";
 process.env.GOOGLE_CLIENT_SECRET = "gsecret";
 process.env.PUBLIC_BASE_URL = "https://platform.example";
@@ -132,16 +130,14 @@ test("a quiet quote gets one follow-up draft, by email, waiting for approval", a
   assert.ok(!JSON.stringify(log).includes("Quiet"), "no customer text in the audit log");
 });
 
-test("the owner is asked on WhatsApp, and approving sends it by email", async () => {
+test("the follow-up waits in the Inbox, and approving sends it by email", async () => {
   const conv = await quoted(A, { name: "Email Ed", email: "ed@example.com", daysAgo: 5 });
-  await withTenant(A, (db) => db.query("update tenant_members set approver_last_inbound_at = now() where role = 'owner'"));
   wa.sent.length = 0;
   await chaseQuotes(A);
   await drain();
-  const ask = wa.sent.find((s) => s.text.includes("Quote follow-up for Email"));
-  assert.ok(ask, "owner got an approval request");
-  assert.equal(ask!.kind, "buttons");
+  assert.equal(wa.sent.length, 0, "nobody is messaged until the owner approves");
   const [d] = await chaseDrafts(A, conv);
+  assert.equal(d.status, "pending_approval");
   const before = google.sent.length;
   assert.equal((await api(OWNER_A, "POST", `/businesses/${A}/drafts/${d.id}/approve`)).status, 200);
   await drain();

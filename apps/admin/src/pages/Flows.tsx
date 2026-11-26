@@ -134,7 +134,7 @@ export function Flows() {
 
       {flow === "enquiry" && current.key === "sent" && (
         <Card title="Sent">
-          <p>Once approved, email and WhatsApp replies are sent for you. For Checkatrade, texts and phone calls you get the final wording on WhatsApp to send yourself.</p>
+          <p>Once approved, email and WhatsApp replies are sent for you. For Checkatrade, texts and phone calls the Inbox shows the final wording for you to send yourself.</p>
           <p className="muted small">WhatsApp only allows a reply within 24 hours of the customer's last message, so after that the reply goes by email if we have their address.</p>
           <Link to="../settings">Which way to reply first is in Settings →</Link>
         </Card>
@@ -350,7 +350,7 @@ function Approve({ data, canManage, save, busy, reload, only }: { data: any; can
                   <div className="track" role="progressbar" aria-valuemin={0} aria-valuemax={n} aria-valuenow={shown} aria-label="Approved without changes"><i style={{ width: `${(shown / n) * 100}%` }} /></div>
                   <div className="muted small">{shown} of {n} approved without changes{k.state === "declined" ? ". You said keep asking, so it won't be offered again; switch it on here any time." : shown === 0 && k.streak === 0 ? ". Changing or rejecting one starts the count again." : ""}</div>
                 </>)}
-                {rung === 1 && <div className="small">Ready: you approved {n} in a row without changes. Answer in the Inbox or on WhatsApp, or use the switch.</div>}
+                {rung === 1 && <div className="small">Ready: you approved {n} in a row without changes. Answer in the Inbox, or use the switch.</div>}
                 {rung === 2 && <div className="muted small">{k.sentAutomatically} sent automatically so far. Changing or rejecting a spot check sends it back to asking you.</div>}
               </>) : <div className="muted small">Always asks you.</div>}
             </div>
@@ -367,7 +367,7 @@ function Approve({ data, canManage, save, busy, reload, only }: { data: any; can
       {msg && <p className="note good">{msg}</p>}
       <Always items={[
         `Spot checks: even when automatic, ${data.spotCheckEvery <= 1 ? "every one" : `every ${ordinal(data.spotCheckEvery)} one`} still comes to you (change this in Settings). If you change or reject one, that kind goes back to asking you.`,
-        "You're told on WhatsApp every time something is sent automatically",
+        "Everything sent automatically is marked in the Inbox, and shows in your WhatsApp Business app if it went by WhatsApp",
         "Never automatic: anything sent by text, phone or Checkatrade, because you send those yourself",
       ]} />
     </Card>

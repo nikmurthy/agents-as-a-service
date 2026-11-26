@@ -10,8 +10,6 @@ process.env.SIGNING_SECRET = "test-signing-secret";
 process.env.AGENT_MODE = "mock";
 process.env.WA_APP_SECRET = "test-app-secret";
 process.env.WA_VERIFY_TOKEN = "verify-me";
-process.env.PLATFORM_WA_PHONE_NUMBER_ID = "PLATFORM";
-process.env.PLATFORM_WA_TOKEN = "platform-token";
 process.env.GOOGLE_CLIENT_ID = "gid";
 process.env.GOOGLE_CLIENT_SECRET = "gsecret";
 process.env.PUBLIC_BASE_URL = "https://platform.example";
@@ -26,6 +24,8 @@ const { taskList } = await import("../src/jobs/tasks.js");
 const { releaseQueue } = await import("../src/jobs/queue.js");
 const { askFeedback } = await import("../src/workflows/ask-feedback.js");
 const { withBookingLink } = await import("../src/workflows/answer-enquiry.js");
+const { approveDraft, editAndApproveDraft } = await import("../src/decisions.js");
+const { answerOffer } = await import("../src/automation.js");
 const { runOnce, Logger } = await import("graphile-worker");
 const { fakeGoogle, fakeWhatsApp, waWebhook } = await import("./fakes.js");
 
@@ -46,9 +46,11 @@ async function postWhatsApp(body: unknown) {
   const sig = "sha256=" + createHmac("sha256", process.env.WA_APP_SECRET!).update(raw).digest("hex");
   return app.request("/webhooks/whatsapp", { method: "POST", body: raw, headers: { "content-type": "application/json", "x-hub-signature-256": sig } });
 }
-const pressButton = (id: string) => postWhatsApp(waWebhook("PLATFORM", OWNER, { type: "interactive", interactive: { type: "button_reply", button_reply: { id, title: "x" } } }, "Mark"));
-const ownerSays = (text: string) => postWhatsApp(waWebhook("PLATFORM", OWNER, { type: "text", text: { body: text } }, "Mark"));
-const fromOwnerSince = (i: number) => wa.sent.slice(i).filter((s) => s.to === OWNER);
+// The owner decides in the Inbox; nothing is sent to them on WhatsApp.
+let ownerId: string;
+const owner = () => ({ memberId: ownerId, audit: `member:${ownerId}` });
+const waiting = () => withTenant(A, (db) => one<any>(db, "select * from drafts where status = 'pending_approval' order by created_at desc limit 1"));
+const pendingCount = () => withTenant(A, (db) => one<{ n: number }>(db, "select count(*)::int as n from drafts where status = 'pending_approval'")).then((r) => r!.n);
 let n = 0;
 async function enquiry(text = "Hi, could you quote for laminate in our lounge?") {
   const phone = `+4477009007${String(++n).padStart(2, "0")}`;
@@ -72,77 +74,68 @@ before(async () => {
   await setTenantStatus(A, "active");
   await setTenantStatus(B, "active");
   await withTenant(A, (db) => db.query("update tenant_use_cases set config = '{\"learnAfter\": 2}' where use_case = 'answer_enquiries'"));
-  await ownerSays("hi"); // opens the owner's WhatsApp window, so approvals use buttons
-  await drain();
+  ownerId = (await withTenant(A, (db) => one<{ id: string }>(db, "select id from tenant_members where role = 'owner'")))!.id;
 });
 
 after(async () => { await releaseQueue(); await closePool(); });
 
 test("no calendar: the reply says the owner will arrange a time, and offers none", async () => {
   const phone = await enquiry();
-  const approval = [...wa.sent].reverse().find((s) => s.to === OWNER && s.buttons)!;
-  assert.match(approval.text, /be in touch shortly to arrange a time/);
+  const d = await waiting();
+  assert.match(d.body, /be in touch shortly to arrange a time/);
   assert.equal(await withTenant(A, (db) => one(db, "select count(*)::int as n from holds")).then((r) => r.n), 0);
-  await pressButton(approval.buttons![0]);
+  await approveDraft(A, owner(), d.id);
   await drain();
   assert.match(wa.last(phone)!.text, /arrange a time/);
 });
 
 test("after the set number of unchanged approvals, the owner is offered automation; yes turns it on", async () => {
-  const mark = wa.sent.length;
   await enquiry();
-  await pressButton([...wa.sent].reverse().find((s) => s.to === OWNER && s.buttons)!.buttons![0]);
+  const r = await approveDraft(A, owner(), (await waiting()).id);
   await drain();
-  const offer = fromOwnerSince(mark).find((s) => s.buttons?.[0]?.startsWith("au:y:"));
-  assert.ok(offer, "offered after 2 unchanged approvals in a row");
+  const offer = r.ok ? r.automation : undefined;
+  assert.equal(offer?.offer, "answer_question", "offered after 2 unchanged approvals in a row");
   assert.match(offer!.text, /last 2 answering questions replies/);
-  assert.equal(offer!.buttons![0], `au:y:${A}:answer_question`);
 
-  await pressButton(offer!.buttons![0]);
-  await drain();
-  assert.match(wa.last(OWNER)!.text, /will now send automatically/);
+  assert.match(await answerOffer(A, "answer_question", true, ownerId, `member:${ownerId}`), /will now send automatically/);
   const a = await withTenant(A, (db) => one(db, "select state, decided_by from automations where category = 'answer_question'"));
   assert.equal(a.state, "on");
   assert.ok(a.decided_by, "who said yes is recorded");
 });
 
-test("automated replies go without asking, and the owner is told; every 3rd is a spot check", async () => {
-  const mark = wa.sent.length;
+test("automated replies go without asking and show as sent automatically; every 3rd is a spot check", async () => {
   const p1 = await enquiry();
   assert.match(wa.last(p1)!.text, /arrange a time/, "sent to the customer without approval");
-  assert.ok(!fromOwnerSince(mark).some((s) => s.buttons), "no approval asked");
-  assert.match(wa.last(OWNER)!.text, /^Sent to Customer\d+ automatically by whatsapp \(answering questions\)/);
+  assert.equal(await pendingCount(), 0, "nothing waiting for the owner");
   const d = await withTenant(A, (db) => one(db, "select status, auto_sent, decided_by from drafts order by created_at desc limit 1"));
   assert.deepEqual([d.status, d.auto_sent, d.decided_by], ["sent", true, null]);
 
   await enquiry();                                      // 2nd: automatic
-  const m3 = wa.sent.length;
   const p3 = await enquiry();                           // 3rd: spot check (Settings: spot check every 3)
-  const check = fromOwnerSince(m3).find((s) => s.buttons)!;
-  assert.ok(check, "spot check asks the owner");
-  assert.match(check.text, /🔎 Spot check/);
+  const check = await waiting();
+  assert.ok(check, "spot check waits for the owner");
+  assert.match(check.attention_reason, /Spot check/);
   assert.notEqual(wa.last(p3)?.text?.includes("arrange"), true, "nothing sent yet");
 
   // The owner changes the spot-checked reply: back to asking.
-  await pressButton(check.buttons![1]);                 // Edit
-  await drain();
-  await ownerSays("Hi! Mark here, I'll ring you tomorrow to sort a time.");
+  const r = await editAndApproveDraft(A, owner(), check.id, "Hi! Mark here, I'll ring you tomorrow to sort a time.");
   await drain();
   assert.equal(wa.last(p3)!.text, "Hi! Mark here, I'll ring you tomorrow to sort a time.");
-  assert.match(wa.last(OWNER)!.text, /go back to asking you about answering questions/);
+  assert.match(r.ok ? r.automation?.text ?? "" : "", /go back to asking you about answering questions/);
   assert.equal((await withTenant(A, (db) => one(db, "select state from automations where category = 'answer_question'"))).state, "declined");
 
-  const m4 = wa.sent.length;
   await enquiry();
-  assert.ok(fromOwnerSince(m4).some((s) => s.buttons?.[0]?.startsWith("a:")), "asks again");
-  assert.ok(!fromOwnerSince(m4).some((s) => s.buttons?.[0]?.startsWith("au:")), "declined: not offered again on its own");
+  assert.equal(await pendingCount(), 1, "asks again");
+  const again = await approveDraft(A, owner(), (await waiting()).id);
+  assert.equal(again.ok && again.automation, undefined, "declined: not offered again on its own");
+  await drain();
+  assert.deepEqual(wa.sent.filter((s) => s.to === OWNER), [], "the owner is never messaged on WhatsApp");
 });
 
 test("complaints are never automated, even with automation on", async () => {
   await withTenant(A, (db) => db.query("update automations set state = 'on', updated_at = now() - interval '1 hour' where category = 'answer_question'"));
-  const mark = wa.sent.length;
   const phone = await enquiry("I'm not happy, there are gaps opening in the floor you fitted");
-  assert.ok(fromOwnerSince(mark).some((s) => s.buttons), "owner is asked");
+  assert.equal(await pendingCount(), 1, "waits for the owner");
   assert.equal(wa.last(phone), undefined, "nothing went to the customer");
   const d = await withTenant(A, (db) => one(db, "select category, auto_sent from drafts order by created_at desc limit 1"));
   assert.deepEqual([d.category, d.auto_sent], [null, false]);
@@ -157,12 +150,10 @@ test("feedback: asked once the booked job has ended, once, with the review link;
     await db.query("insert into holds (tenant_id, conversation_id, contact_id, start_at, end_at, status) values (app_current_tenant(), $1, $2, now() - interval '2 days 2 hours', now() - interval '2 days', 'confirmed')", [convs[0].id, convs[0].contact_id]);
     await db.query("insert into holds (tenant_id, conversation_id, contact_id, start_at, end_at, status) values (app_current_tenant(), $1, $2, now() + interval '1 day', now() + interval '1 day 2 hours', 'confirmed')", [convs[1].id, convs[1].contact_id]);
   });
-  const mark = wa.sent.length;
   assert.equal(await askFeedback(A), 1, "only the finished job");
   await drain();
-  const ask = fromOwnerSince(mark).find((s) => s.buttons)!;
-  assert.match(ask.text, /Ask Customer1 for feedback\? Their job is done/);
-  assert.match(ask.text, /https:\/\/g\.page\/r\/marks-flooring\/review/);
+  const ask = await withTenant(A, (db) => one<any>(db, "select * from drafts where kind = 'feedback' and status = 'pending_approval'"));
+  assert.match(ask.body, /https:\/\/g\.page\/r\/marks-flooring\/review/);
   assert.equal(await askFeedback(A), 0, "asked once only");
 });
 
