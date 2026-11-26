@@ -29,7 +29,7 @@ export async function chaseAllQuotes(): Promise<void> {
 }
 
 export async function chaseQuotes(tenantId: string, now = new Date()): Promise<number> {
-  const next: NextStep[] = [];
+  const next: (NextStep | undefined)[] = [];
   const made = await withTenant(tenantId, async (db) => {
     if (!(await useCaseEnabled(db, "chase_quotes"))) return 0;
     const cfg = await one<{ config: { afterDays?: number } }>(db, "select config from tenant_use_cases where use_case = 'chase_quotes'");

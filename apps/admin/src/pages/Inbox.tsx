@@ -15,6 +15,9 @@ export function Inbox() {
   return (
     <Page title="Inbox" actions={
       <label className="check"><input type="checkbox" checked={waiting} onChange={(e) => setParams(e.target.checked ? { waiting: "1" } : {})} /> Only replies waiting for you</label>}>
+      {data && (data.needsYou > 0
+        ? <p className="note warn" role="status"><strong>{data.needsYou} {data.needsYou === 1 ? "customer needs" : "customers need"} you</strong>: a reply is written and waiting for you to approve, change or replace.</p>
+        : <p className="muted">Nothing needs you right now.</p>)}
       <ErrorNote message={error} />
       {loading && !data && <Loading />}
       {data && !data.conversations.length && <Empty>{waiting ? "No replies are waiting." : "No conversations yet."}</Empty>}
@@ -55,7 +58,7 @@ export function Conversation() {
       <div className="thread">
         {data.messages.map((m: any) => (
           <div key={m.id} className={`bubble ${m.direction}`}>
-            <div className="muted small">{m.direction === "in" ? (m.from_name ?? "Customer") : m.from_name === "owner" ? "You, from the WhatsApp app" : "✓ Sent"} · {CHANNEL[m.channel] ?? m.channel.replace("_", " ")} · {when(m.received_at)}</div>
+            <div className="muted small">{m.direction === "in" ? (m.from_name ?? "Customer") : m.from_name === "owner" ? "You, from the WhatsApp app" : m.auto_sent ? "✓ Sent automatically" : "✓ Sent"} · {CHANNEL[m.channel] ?? m.channel.replace("_", " ")} · {when(m.received_at)}</div>
             {m.subject && <strong>{m.subject}</strong>}
             <p>{m.body ?? <em className="muted">Removed</em>}</p>
           </div>
@@ -73,11 +76,11 @@ export function Conversation() {
           </div>
         ))}
       </div>
-      {data.lead && <CheckatradeLead lead={data.lead} contact={data.contact} convId={data.conversation.id} bizId={id} onChange={reload} />}
+      {data.lead && <CheckatradeLead lead={data.lead} contact={data.contact} convId={data.conversation.id} bizId={id} onChange={reload} replyWaiting={data.drafts.some((d: any) => d.status === "pending_approval")} />}
       <Quote conv={data.conversation} bizId={id} onChange={reload} />
       <JobDone conv={data.conversation} bizId={id} onChange={reload} />
       <Personal conv={data.conversation} bizId={id} onChange={reload} />
-      {cards.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} leadPending={data.lead?.decision === "pending" && d.kind === "reply"} />)}
+      {cards.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} contact={data.contact} customer={data.conversation.name} leadPending={data.lead?.decision === "pending" && d.kind === "reply"} />)}
       {!data.conversation.ignored_at && <WriteReply convId={data.conversation.id} bizId={id} onChange={reload} />}
     </Page>
   );
@@ -125,7 +128,7 @@ function WriteReply({ convId, bizId, onChange }: { convId: string; bizId: string
 }
 
 /** Checkatrade doesn't allow automated access, so the owner makes this one decision there by hand. */
-function CheckatradeLead({ lead, contact, convId, bizId, onChange }: { lead: any; contact: any; convId: string; bizId: string; onChange: () => void }) {
+function CheckatradeLead({ lead, contact, convId, bizId, onChange, replyWaiting }: { lead: any; contact: any; convId: string; bizId: string; onChange: () => void; replyWaiting: boolean }) {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const { busy, error, run } = useAction();
@@ -136,7 +139,9 @@ function CheckatradeLead({ lead, contact, convId, bizId, onChange }: { lead: any
     <Card title="Checkatrade lead">
       {lead.decision === "pending" && (<>
         <p>{lead.suggestion === "interested" ? <>Suggested: <strong>I'm interested</strong>.</> : <>Suggested: <strong>Not for me</strong> ({lead.suggestion_reason ?? "doesn't look like a fit"}).</>}</p>
-        <p className="muted">Decide with the reply below: <em>Interested</em> approves it for you to paste into Checkatrade; <em>Not for me</em> sends nothing.</p>
+        {replyWaiting
+          ? <p className="muted">Decide with the reply below: <em>Interested</em> approves it for you to paste into Checkatrade; <em>Not for me</em> sends nothing.</p>
+          : <ol><li>{open}</li><li>Tap <strong>Not for me</strong></li><li>Choose: {lead.suggestion_reason ?? "the reason that fits"}</li></ol>}
       </>)}
       {lead.decision === "not_for_me" && (
         <ol><li>{open}</li><li>Tap <strong>Not for me</strong></li><li>Choose: {lead.suggestion_reason ?? "the reason that fits"}</li></ol>
@@ -218,7 +223,16 @@ function Personal({ conv, bizId, onChange }: { conv: any; bizId: string; onChang
   );
 }
 
-function Draft({ draft, bizId, onChange, leadPending }: { draft: any; bizId: string; onChange: () => void; leadPending?: boolean }) {
+/** For replies we can't send ourselves: what the owner does with the wording above. */
+function yourself(route: string, customer?: string, phone?: string) {
+  const first = (customer ?? "").trim().split(/\s+/)[0] || "the customer";
+  if (route === "checkatrade_message") return "Copy this and paste it into the job's chat in Checkatrade.";
+  if (route === "sms") return `Text this to ${first}${phone ? ` on ${phone}` : ""}.`;
+  if (route === "phone") return `Call ${first}${phone ? ` on ${phone}` : ""}. Use the wording above as a guide.`;
+  return "Send this yourself.";
+}
+
+function Draft({ draft, bizId, onChange, leadPending, contact, customer }: { draft: any; bizId: string; onChange: () => void; leadPending?: boolean; contact?: any; customer?: string }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(draft.body);
   const { busy, error, run } = useAction();
@@ -253,7 +267,7 @@ function Draft({ draft, bizId, onChange, leadPending }: { draft: any; bizId: str
           </>)}
         </div>
       )}
-      {draft.status === "manual" && <p className="muted">This one needs you to send it yourself.</p>}
+      {draft.status === "manual" && <p className="note">{yourself(draft.reply_route, customer, contact?.phone)}</p>}
       {automation && (<>
         <p className={`note ${automation.offer ? "" : "good"}`}>{automation.text}</p>
         {automation.offer && (canManage ? (

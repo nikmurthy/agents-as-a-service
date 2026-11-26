@@ -6,7 +6,6 @@ import { clients } from "./integrations/index.js";
 import { parseCheckatradeWebhook, parseSmsRelay, parseWebForm, parseWhatsAppContactSync, parseWhatsAppEchoes, parseWhatsAppFailures, parseWhatsAppWebhook, waToInbound } from "./channels/parse.js";
 import { businessForNumber, deliveryFailed, finishWhatsAppSignup, isForTheBusiness, ownerReplied, saveContacts } from "./whatsapp-business.js";
 import { ingest } from "./ingest.js";
-import { handleOwnerMessage } from "./approvals.js";
 import { audit } from "./audit.js";
 import { googleConnectLink, googleRedirectUri } from "./google-link.js";
 import { whatsappConnectLink } from "./whatsapp-link.js";
@@ -38,10 +37,6 @@ app.post("/webhooks/whatsapp", async (c) => {
   }
   const body = JSON.parse(raw);
   for (const w of parseWhatsAppWebhook(body)) {
-    if (env.hasPlatformWa && w.phoneNumberId === env.platformWaPhoneNumberId) {
-      await handleOwnerMessage(w);              // an owner answering an approval request
-      continue;
-    }
     const n = await businessForNumber(w.phoneNumberId);
     // The Phone number ID isn't connected to any business (often the account ID was pasted instead). Not personal data.
     if (!n) console.warn("WhatsApp message for a number no business has connected: Phone number ID", w.phoneNumberId);

@@ -75,7 +75,7 @@ jobs:
             | flyctl secrets import --app "$FLY_APP" --stage > /dev/null
           echo "Secrets now in Fly:"; flyctl secrets list --app "$FLY_APP"
           for name in DATABASE_URL DATA_ENCRYPTION_KEY SIGNING_SECRET ANTHROPIC_API_KEY WA_APP_SECRET WA_VERIFY_TOKEN \
-                      PLATFORM_WA_PHONE_NUMBER_ID PLATFORM_WA_TOKEN GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
+                      GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
             jq -e --arg n "$name" 'any(.[]; .key == $n and .value != "")' <<<"$secrets" > /dev/null || echo "::warning::$name is not in Bitwarden yet"
           done
 

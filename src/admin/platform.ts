@@ -23,9 +23,9 @@ const SERVICES: { id: Service; name: string; purpose: string; keys: string[]; wh
   },
   {
     id: "whatsapp", name: "WhatsApp",
-    purpose: "The platform's own number, which sends owners their approval requests, and the webhook that receives WhatsApp messages.",
-    keys: ["PLATFORM_WA_PHONE_NUMBER_ID", "PLATFORM_WA_TOKEN", "WA_APP_SECRET", "WA_VERIFY_TOKEN"],
-    where: "Meta for Developers → your app → WhatsApp → API setup, and App settings → Basic for the app secret.",
+    purpose: "The webhook that receives every business's WhatsApp messages. Each business's own number and token are added in its Connections.",
+    keys: ["WA_APP_SECRET", "WA_VERIFY_TOKEN"],
+    where: "Meta for Developers → your app → App settings → Basic for the app secret. The verify token is the one you chose for the webhook.",
   },
   {
     id: "whatsapp_signup", name: "WhatsApp Business app numbers",
@@ -58,8 +58,8 @@ export async function testService(id: Service): Promise<{ ok: boolean; detail: s
       return { ok: true, detail: "Claude answered. The key works and there is credit." };
     }
     if (id === "google") return await clients.google.checkClient(googleRedirectUri());
-    if (id === "whatsapp_signup") return { ok: true, detail: "Both are set. Meta checks them when a business connects its number." };
-    return await clients.whatsapp.checkSender({ phoneNumberId: env.platformWaPhoneNumberId, accessToken: env.platformWaToken });
+    // Both WhatsApp keys are only checked by Meta: the secret on each webhook, the verify token when the webhook is set up.
+    return { ok: true, detail: id === "whatsapp_signup" ? "Both are set. Meta checks them when a business connects its number." : "Both are set. Meta checks them on each message it sends here." };
   } catch (e: any) {
     const msg = String(e?.message ?? e);
     if (id === "claude") {

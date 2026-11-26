@@ -31,7 +31,6 @@ export interface TenantSettings {
   checkatradeSenders?: string[];       // From addresses of Checkatrade lead emails
   retentionDays?: number;              // message bodies deleted after this many days
   replyStyle?: ReplyStyle;             // set in Flows → Reply (not on the Settings form)
-  weeklySummary?: boolean;             // Friday WhatsApp "here's what I did this week" (switched on in Overview)
 }
 
 export interface ReplyStyle {

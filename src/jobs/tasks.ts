@@ -1,19 +1,16 @@
 import type { TaskList } from "graphile-worker";
 import { many, withAdmin, withTenant } from "../db.js";
 import { answerEnquiry } from "../workflows/answer-enquiry.js";
-import { sendApproval } from "../approvals.js";
 import { sendOutbox } from "../outbox.js";
 import { pollAllGmail } from "../channels/gmail-poll.js";
 import { chaseAllQuotes } from "../workflows/chase-quotes.js";
 import { askAllFeedback } from "../workflows/ask-feedback.js";
-import { sendWeeklySummaries } from "../workflows/weekly-summary.js";
 import { releaseHold } from "../calendar.js";
 import { audit } from "../audit.js";
 import { enqueue } from "./queue.js";
 
 export const taskList: TaskList = {
   process_inbound: async (p: any) => answerEnquiry(p.tenantId, p.messageId),
-  send_approval: async (p: any) => sendApproval(p.tenantId, p.draftId),
   send_outbox: async (p: any, helpers) => sendOutbox(p.tenantId, p.draftId, helpers.job.attempts, helpers.job.max_attempts),
 
   // ---- scheduled (see crontab in worker.ts)
@@ -24,9 +21,6 @@ export const taskList: TaskList = {
 
   /** Ask customers how it went, once their job is done. */
   ask_feedback: async () => { await askAllFeedback(); },
-
-  /** Friday afternoon: "here's what I did this week", for owners who asked for it. */
-  weekly_summary: async () => { await sendWeeklySummaries(); },
 
   /** Release held times the customer didn't pick in time. */
   expire_holds: async () => {
@@ -64,5 +58,4 @@ export const crontab = [
   "30 3 * * * retention",
   "0 9 * * * chase_quotes",
   "0 10 * * * ask_feedback",
-  "0 16 * * 5 weekly_summary",
 ].join("\n");

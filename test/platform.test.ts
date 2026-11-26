@@ -10,8 +10,6 @@ process.env.SIGNING_SECRET = "test-signing-secret";
 process.env.AGENT_MODE = "mock";
 process.env.WA_APP_SECRET = "test-app-secret";
 process.env.WA_VERIFY_TOKEN = "verify-me";
-process.env.PLATFORM_WA_PHONE_NUMBER_ID = "PLATFORM";
-process.env.PLATFORM_WA_TOKEN = "platform-token";
 process.env.GOOGLE_CLIENT_ID = "gid";
 process.env.GOOGLE_CLIENT_SECRET = "gsecret";
 process.env.PUBLIC_BASE_URL = "https://platform.example";
@@ -26,6 +24,8 @@ const { taskList } = await import("../src/jobs/tasks.js");
 const { releaseQueue } = await import("../src/jobs/queue.js");
 const { erasePerson } = await import("../src/data-rights.js");
 const { formatLocal } = await import("../src/time.js");
+const { approveDraft, rejectDraft, editAndApproveDraft } = await import("../src/decisions.js");
+const { addContactDetails } = await import("../src/leads.js");
 const { runOnce, Logger } = await import("graphile-worker");
 const { fakeGoogle, fakeWhatsApp, waWebhook, gmailMsg } = await import("./fakes.js");
 
@@ -49,9 +49,14 @@ async function postWhatsApp(body: unknown, secret = process.env.WA_APP_SECRET!) 
   const sig = "sha256=" + createHmac("sha256", secret).update(raw).digest("hex");
   return app.request("/webhooks/whatsapp", { method: "POST", body: raw, headers: { "content-type": "application/json", "x-hub-signature-256": sig } });
 }
-const pressButton = (id: string, viaTemplate = false) => postWhatsApp(waWebhook("PLATFORM", OWNER,
-  viaTemplate ? { type: "button", button: { payload: id, text: "Approve" } } : { type: "interactive", interactive: { type: "button_reply", button_reply: { id, title: "x" } } }, "Mark"));
-const lastButtons = () => [...wa.sent].reverse().find((s) => s.to === OWNER && s.buttons)!;
+// The owner decides in the Inbox. Nothing is ever sent to the owner on WhatsApp.
+const owner = { memberId: null, audit: "member:owner" };
+const waiting = () => withTenant(A, (db) => one<any>(db,
+  `select d.*, l.suggestion, l.suggestion_reason from drafts d left join checkatrade_leads l on l.conversation_id = d.conversation_id and l.decision = 'pending'
+   where d.status = 'pending_approval' order by d.created_at desc limit 1`));
+const approve = async () => approveDraft(A, owner, (await waiting()).id);
+const reject = async () => rejectDraft(A, owner, (await waiting()).id);
+const toOwner = () => wa.sent.filter((s) => s.to === OWNER);
 
 let A: string; // the floor layer
 let B: string; // another business, to prove isolation
@@ -101,7 +106,7 @@ test("rejects WhatsApp webhooks with a bad signature", async () => {
   assert.equal(res.status, 401);
 });
 
-test("WhatsApp enquiry -> held times in the diary -> approval by template -> owner approves -> customer gets reply", async () => {
+test("WhatsApp enquiry -> held times in the diary -> waits in the Inbox -> owner approves -> customer gets reply", async () => {
   const res = await postWhatsApp(waWebhook("TENANT_WA", CUSTOMER, { type: "text", text: { body: "Hi, could you quote for laminate in our lounge, about 4m x 5m?" } }, "Jo Smith"));
   assert.equal(res.status, 200);
   await drain();
@@ -111,11 +116,12 @@ test("WhatsApp enquiry -> held times in the diary -> approval by template -> own
   assert.equal(google.liveEvents().filter(([, e]) => e.status === "tentative").length, 3, "held as tentative events in Google Calendar");
   assert.equal(new Set(holds.map((h) => h.start_at.toISOString().slice(0, 10))).size, 3, "spread over three days");
 
-  const approval = lastButtons();
-  assert.equal(approval.kind, "template", "owner hasn't messaged yet, so a template is used");
-  assert.match(approval.text, /Jo/);
+  const d = await waiting();
+  assert.match(d.body, /measure up/);
+  assert.equal(wa.last(CUSTOMER), undefined, "nothing goes until the owner approves");
+  assert.deepEqual(toOwner(), [], "the owner isn't messaged on WhatsApp");
 
-  await pressButton(approval.buttons![0], true);
+  await approve();
   await drain();
   const toCustomer = wa.last(CUSTOMER)!;
   assert.equal(toCustomer.from, "TENANT_WA", "sent from the business's own number");
@@ -124,7 +130,7 @@ test("WhatsApp enquiry -> held times in the diary -> approval by template -> own
   assert.equal(draft.status, "sent");
 });
 
-test("customer picks a time -> booking confirmed, other holds released -> approval now uses buttons", async () => {
+test("customer picks a time -> booking confirmed, other holds released -> confirmation approved", async () => {
   const offered = await withTenant(A, (db) => many(db, "select id, start_at from holds where status = 'held' order by start_at"));
   const pick = offered[1];
   const weekday = formatLocal(new Date(pick.start_at).toLocaleString("sv-SE", { timeZone: "Europe/London" }).replace(" ", "T").slice(0, 16)).split(" ")[0];
@@ -138,15 +144,13 @@ test("customer picks a time -> booking confirmed, other holds released -> approv
   assert.equal(live.length, 1, "only the booked event remains in the diary");
   assert.equal(live[0][1].status, "confirmed");
 
-  const approval = lastButtons();
-  assert.equal(approval.kind, "buttons", "owner messaged within 24h, so interactive buttons");
-  assert.match(approval.text, /booked in/);
-  await pressButton(approval.buttons![0]);
+  assert.match((await waiting()).body, /booked in/);
+  await approve();
   await drain();
   assert.match(wa.last(CUSTOMER)!.text, /booked in/);
 });
 
-test("Checkatrade lead: owner taps Interested -> gets the steps -> sends the customer's details -> saved for direct replies", async () => {
+test("Checkatrade lead: owner taps Interested -> wording to paste -> adds the customer's details -> saved for direct replies", async () => {
   google.addEmail(gmailMsg({
     id: "ct1", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example", subject: "New lead: Flooring in BS16",
     html: `<table><tr><td><b>Job</b></td><td>LVT kitchen</td></tr><tr><td><b>Description</b></td><td>Click LVT in kitchen diner, about 25m2.</td></tr><tr><td><b>Customer</b></td><td>Chloe Bennett</td></tr></table>
@@ -160,23 +164,18 @@ test("Checkatrade lead: owner taps Interested -> gets the steps -> sends the cus
   assert.equal(msg.from_name, "Chloe Bennett");
   const draft = await withTenant(A, (db) => one(db, "select id, reply_route, conversation_id from drafts order by created_at desc limit 1"));
   assert.equal(draft.reply_route, "checkatrade_message", "no email for Chloe yet, so the reply is pasted into Checkatrade");
-  const approval = lastButtons();
-  assert.match(approval.text, /Suggested: 👍 I'm interested/);
+  assert.equal((await waiting()).suggestion, "interested");
 
-  await pressButton(approval.buttons![0]);                 // Interested
+  await approve();                                          // Interested
   await drain();
-  const steps = wa.last(OWNER)!.text;
-  assert.match(steps, /^Checkatrade: Chloe, LVT kitchen/);
-  assert.match(steps, /Open the job: https:\/\/membersapp\.checkatrade\.com\/jobs\/abc-123/);
-  assert.match(steps, /Tap "I'm interested"/);
-  assert.match(steps, /Send me Chloe's phone number or email/);
   assert.equal((await withTenant(A, (db) => one(db, "select status from drafts where id = $1", [draft.id]))).status, "manual");
   assert.equal((await withTenant(A, (db) => one(db, "select decision from checkatrade_leads where conversation_id = $1", [draft.conversation_id]))).decision, "interested");
 
-  // The owner copies Chloe's details out of Checkatrade and sends them to the platform number.
-  await postWhatsApp(waWebhook("PLATFORM", OWNER, { type: "text", text: { body: "Her number is 07700 900811 and email chloe.b@example.com" } }, "Mark"));
-  await drain();
-  assert.match(wa.last(OWNER)!.text, /Saved Chloe's number and email ✓/);
+  assert.equal((await withTenant(A, (db) => one(db, "select count(*)::int as n from messages where conversation_id = $1 and direction = 'out'", [draft.conversation_id]))).n, 0,
+    "wording to paste isn't shown as sent");
+  // The owner copies Chloe's details out of Checkatrade into the Inbox.
+  const added = await addContactDetails(A, draft.conversation_id, { phone: "07700 900811", email: "chloe.b@example.com" }, "member:owner");
+  assert.equal(added.ok, true);
   const ids = await withTenant(A, (db) => many(db,
     "select kind, value from contact_identities where contact_id = (select contact_id from conversations where id = $1) order by kind", [draft.conversation_id]));
   assert.deepEqual(ids.map((i) => `${i.kind}:${i.value}`), ["email:chloe.b@example.com", "phone:+447700900811"]);
@@ -189,38 +188,35 @@ test("Checkatrade lead: owner taps Interested -> gets the steps -> sends the cus
   const next = await withTenant(A, (db) => one(db, "select reply_route, conversation_id from drafts order by created_at desc limit 1"));
   assert.equal(next.conversation_id, draft.conversation_id, "same customer, same conversation");
   assert.equal(next.reply_route, "email");
-  assert.doesNotMatch(lastButtons().text, /Suggested/);
-  await pressButton(lastButtons().buttons![2]);            // not needed for this test: reject
+  assert.equal((await waiting()).suggestion, null, "the lead is decided: no suggestion now");
+  await reject();                                           // not needed for this test
   await drain();
 });
 
-test("Checkatrade lead outside the area: Not for me is suggested; pressing it sends nothing and gives the steps", async () => {
+test("Checkatrade lead outside the area: Not for me is suggested; choosing it sends nothing", async () => {
   google.addEmail(gmailMsg({ id: "ct-far", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example", subject: "New lead: Carpet in IV2",
     text: "Job: Bedroom carpet\nPostcode: IV2 3AB\nCustomer: Rory Mackay\nDescription: Carpet for a double bedroom." }));
   await taskList.poll_gmail!({}, {} as any);
   await drain();
-  const approval = lastButtons();
-  assert.match(approval.text, /Suggested: Not for me \(Outside the area we cover\)/);
-  const sentBefore = wa.sent.filter((s) => s.to !== OWNER).length + google.sent.length;
-  await pressButton(approval.buttons![2]);                 // Not for me
+  const w = await waiting();
+  assert.deepEqual([w.suggestion, w.suggestion_reason], ["not_for_me", "Outside the area we cover"]);
+  const sentBefore = wa.sent.length + google.sent.length;
+  await reject();                                           // Not for me
   await drain();
-  const reply = wa.last(OWNER)!.text;
-  assert.match(reply, /not for you\. Nothing was sent to Rory/);
-  assert.match(reply, /Tap "Not for me"/);
-  assert.match(reply, /Choose: Outside the area we cover/);
-  assert.equal(wa.sent.filter((s) => s.to !== OWNER).length + google.sent.length, sentBefore);
+  assert.equal(wa.sent.length + google.sent.length, sentBefore);
   const lead = await withTenant(A, (db) => one(db, "select l.decision from checkatrade_leads l join messages m on m.id = l.message_id where m.channel_message_id = 'ct-far'"));
   assert.equal(lead.decision, "not_for_me");
 });
 
-test("Checkatrade spam lead: no draft, just the steps to turn it down", async () => {
+test("Checkatrade spam lead: no draft; the lead is there to turn down in the Inbox", async () => {
   const draftsBefore = (await withTenant(A, (db) => one(db, "select count(*)::int as n from drafts"))).n;
   google.addEmail(gmailMsg({ id: "ct-spam", from: "Checkatrade <noreply@checkatrade.com>", to: "owner@business.example", subject: "New lead: Flooring",
     text: "Customer: Flooring Supplies Ltd\nDescription: We offer trade prices on all laminate, call us." }));
   await taskList.poll_gmail!({}, {} as any);
   await drain();
-  assert.match(wa.last(OWNER)!.text, /looks like one to turn down: This job is spam/);
-  assert.match(wa.last(OWNER)!.text, /Tap "Not for me"/);
+  const lead = await withTenant(A, (db) => one(db, "select l.decision, l.suggestion, l.suggestion_reason from checkatrade_leads l join messages m on m.id = l.message_id where m.channel_message_id = 'ct-spam'"));
+  assert.deepEqual([lead.decision, lead.suggestion], ["pending", "not_for_me"]);
+  assert.match(lead.suggestion_reason, /spam/);
   assert.equal((await withTenant(A, (db) => one(db, "select count(*)::int as n from drafts"))).n, draftsBefore);
 });
 
@@ -237,9 +233,9 @@ test("Checkatrade lead with the customer's email -> approved reply goes to the c
   assert.equal(draft.reply_route, "email");
 
   const before = google.sent.length;
-  await pressButton(lastButtons().buttons![0]);
+  const r = await approve();
+  assert.ok(r.ok && r.lead?.decision === "interested", "approving also answers the lead");
   await drain();
-  assert.match(wa.last(OWNER)!.text, /Sending to Dan by email now ✓ In Checkatrade, also tap "I'm interested"/);
   assert.equal(google.sent.length, before + 1);
   const mail = google.sent.at(-1)!;
   assert.equal(mail.threadId, undefined, "not threaded into Checkatrade's notification");
@@ -264,10 +260,7 @@ test("Checkatrade lead with the customer's email -> approved reply goes to the c
 test("owner edits a draft: their wording is what gets sent", async () => {
   await postWhatsApp(waWebhook("TENANT_WA", "+447700900666", { type: "text", text: { body: "Do you fit carpet on stairs?" } }, "Sam"));
   await drain();
-  await pressButton(lastButtons().buttons![1]);           // Edit
-  await drain();
-  assert.match(wa.last(OWNER)!.text, /exactly as you want/);
-  await postWhatsApp(waWebhook("PLATFORM", OWNER, { type: "text", text: { body: "Yes we do! When are you free for me to pop round? Mark" } }, "Mark"));
+  await editAndApproveDraft(A, owner, (await waiting()).id, "Yes we do! When are you free for me to pop round? Mark");
   await drain();
   assert.equal(wa.last("+447700900666")!.text, "Yes we do! When are you free for me to pop round? Mark");
 });
@@ -276,22 +269,21 @@ test("complaint is flagged to the owner; rejecting it sends nothing", async () =
   google.addEmail(gmailMsg({ id: "c1", from: "Lisa Morgan <lisa@example.com>", to: "owner@business.example", subject: "Gaps", text: "The laminate you fitted has gaps opening by the patio doors. Not happy." }));
   await taskList.poll_gmail!({}, {} as any);
   await drain();
-  const approval = lastButtons();
-  assert.match(approval.text, /⚠️/);
+  assert.equal((await waiting()).needs_attention, true, "flagged for a closer look");
   const sentBefore = google.sent.length;
-  await pressButton(approval.buttons![2]);                 // Reject
+  await reject();
   await drain();
-  assert.match(wa.last(OWNER)!.text, /Rejected/);
   assert.equal(google.sent.length, sentBefore, "no email sent");
 });
 
-test("pressing a button twice doesn't send twice", async () => {
+test("approving twice doesn't send twice, and the owner was never messaged on WhatsApp", async () => {
   const d = await withTenant(A, (db) => one(db, "select id from drafts where status = 'sent' limit 1"));
   const before = wa.sent.length;
-  await pressButton(`a:${d.id}`);
+  const r = await approveDraft(A, owner, d.id);
+  assert.deepEqual(r, { ok: false, reason: "already_decided", status: "sent" });
   await drain();
-  assert.match(wa.last(OWNER)!.text, /Already sent/);
-  assert.equal(wa.sent.filter((s) => s.to !== OWNER).length, wa.sent.slice(0, before).filter((s) => s.to !== OWNER).length);
+  assert.equal(wa.sent.length, before);
+  assert.deepEqual(toOwner(), []);
 });
 
 test("website form webhook lands as a message for the right business", async () => {

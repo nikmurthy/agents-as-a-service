@@ -47,8 +47,8 @@ export const newBusinessSchema = z.object({
   pack: z.enum(["flooring", "trades", "practitioner"]),
   owner: z.object({
     name: z.string().trim().min(1).max(120),
-    whatsapp: z.string().trim().min(6).max(30),
-    email: z.string().trim().email().optional(),
+    email: z.string().trim().email("They sign in with their email"),
+    whatsapp: z.string().trim().min(6).max(30).optional(),
   }),
   useCases: z.array(z.enum(["answer_enquiries", "book_appointments"])).optional(),
 });

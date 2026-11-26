@@ -32,13 +32,13 @@ export function Businesses({ me }: { me: Me }) {
 
 function NewBusiness({ onDone }: { onDone: () => void }) {
   const { busy, error, field, run } = useAction();
-  const [f, setF] = useState({ slug: "", name: "", pack: "trades", ownerName: "", ownerWhatsapp: "", ownerEmail: "" });
+  const [f, setF] = useState({ slug: "", name: "", pack: "trades", ownerName: "", ownerEmail: "" });
   const [link, setLink] = useState<string>();
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const submit = (e: FormEvent) => {
     e.preventDefault();
     run(async () => {
-      const r = await post("/businesses", { slug: f.slug, name: f.name, pack: f.pack, owner: { name: f.ownerName, whatsapp: f.ownerWhatsapp, email: f.ownerEmail || undefined } });
+      const r = await post("/businesses", { slug: f.slug, name: f.name, pack: f.pack, owner: { name: f.ownerName, email: f.ownerEmail } });
       setLink(r.googleLink);
     });
   };
@@ -62,8 +62,7 @@ function NewBusiness({ onDone }: { onDone: () => void }) {
           </select>
         </Field>
         <Field label="Owner's name"><input required value={f.ownerName} onChange={set("ownerName")} /></Field>
-        <Field label="Owner's WhatsApp number" hint="Approvals are sent here."><input required inputMode="tel" value={f.ownerWhatsapp} onChange={set("ownerWhatsapp")} /></Field>
-        <Field label="Owner's email" hint="They sign in with this address."><input type="email" value={f.ownerEmail} onChange={set("ownerEmail")} /></Field>
+        <Field label="Owner's email" hint="They sign in with this address and approve replies in the Inbox."><input required type="email" value={f.ownerEmail} onChange={set("ownerEmail")} /></Field>
         <ErrorNote message={error ? (field ? `${error} (${field})` : error) : undefined} />
         <button className="primary" disabled={busy}>Create business</button>
       </form>

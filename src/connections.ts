@@ -4,7 +4,6 @@ import { decryptJson, encryptJson } from "./crypto.js";
 import { clients } from "./integrations/index.js";
 import type { GoogleTokens } from "./integrations/google.js";
 import type { WaSender } from "./integrations/whatsapp.js";
-import { env } from "./env.js";
 
 export interface Connection {
   id: string; tenant_id: string; kind: string; external_id: string; status: string;
@@ -42,7 +41,3 @@ export async function tenantWaSender(db: Db): Promise<WaSender | undefined> {
   const { accessToken } = decryptJson<{ accessToken: string }>(conn.secret_ciphertext);
   return { phoneNumberId: conn.external_id, accessToken };
 }
-
-/** The platform's own WhatsApp number, for messages to business owners. Undefined until it's set up. */
-export const platformWaSender = (): WaSender | undefined =>
-  env.hasPlatformWa ? { phoneNumberId: env.platformWaPhoneNumberId, accessToken: env.platformWaToken } : undefined;

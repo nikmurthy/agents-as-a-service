@@ -51,7 +51,7 @@ export function Agents() {
           <li className="flow-step"><strong>Booking</strong><span>Free times from your calendar</span><em>Only when they want an appointment.</em></li>
           <li className="flow-step"><strong>Drafting</strong><span>Writes the reply</span></li>
           <li className="flow-step"><strong>Reviewer</strong><span>Checks and scores it</span><em>Low scores are flagged for you.</em></li>
-          <li className="flow-step you"><strong>You approve</strong><span>On WhatsApp or in the Inbox. Edit or reject if you like.</span></li>
+          <li className="flow-step you"><strong>You approve</strong><span>In the Inbox. Edit or reject if you like.</span></li>
           <li className="flow-step out"><strong>Sent</strong><span>Through the channel it came in on</span></li>
         </ol>
       </Card>

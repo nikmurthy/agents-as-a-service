@@ -18,7 +18,7 @@ export function Overview() {
     <Page title="Overview">
       <ReplyQueue />
       <SetupChecklist />
-      <ThisWeek week={data.week} on={data.weeklySummary} canManage={canManage} onChange={reload} />
+      <ThisWeek week={data.week} />
       <h2 className="section">Today</h2>
       <div className="stats">
         <Stat label="Messages in" value={n.messages_today} />
@@ -56,10 +56,8 @@ export function Overview() {
   );
 }
 
-// A calm weekly "here's what I did": facts, no streaks, no guilt. Optionally on WhatsApp on Friday afternoons.
-function ThisWeek({ week, on, canManage, onChange }: { week: any; on: boolean; canManage: boolean; onChange: () => void }) {
-  const { id } = useBiz();
-  const t = useAction();
+// A calm weekly "here's what I did": facts, no streaks, no guilt.
+function ThisWeek({ week }: { week: any }) {
   if (!week) return null;
   const quiet = !week.messagesIn && !week.repliesSent && !week.booked;
   const mins = week.avgMinutesToReply;
@@ -77,12 +75,6 @@ function ThisWeek({ week, on, canManage, onChange }: { week: any; on: boolean; c
         </dl>
       )}
       <p className="muted small">The last 7 days. {week.messagesIn} {week.messagesIn === 1 ? "message" : "messages"} came in.</p>
-      {canManage && (
-        <label className="row switch toggle"><span>Send me this on WhatsApp on Friday afternoons</span>
-          <input type="checkbox" role="switch" checked={on} disabled={t.busy}
-            onChange={(e) => t.run(async () => { await put(`/businesses/${id}/weekly-summary`, { on: e.target.checked }); onChange(); })} /></label>
-      )}
-      <ErrorNote message={t.error} />
     </Card>
   );
 }

@@ -104,12 +104,11 @@ The whole app uses the Atkinson Hyperlegible font (made for low-vision readers),
 |---|---|
 | Database: businesses, people, channels, conversations, drafts, holds, automations, Checkatrade leads, audit log, data requests. Row-level security on every table | `supabase/migrations/` |
 | Webhook server: WhatsApp (signature checked), forms, Checkatrade, texts, Google connection; admin API | `src/app.ts`, `src/admin/` |
-| Worker: agent runs, approvals, sending, Gmail checks, hold expiry, quote chasing (09:00), feedback (10:00), weekly summary (Fridays 16:00), retention, stuck-message sweep | `src/jobs/tasks.ts`, `src/worker.ts` |
+| Worker: agent runs, sending, Gmail checks, hold expiry, quote chasing (09:00), feedback (10:00), retention, stuck-message sweep | `src/jobs/tasks.ts`, `src/worker.ts` |
 | Use cases | `src/workflows/answer-enquiry.ts`, `chase-quotes.ts`, `ask-feedback.ts` |
 | Try it (a read-only dry run) and the weekly summary | `src/workflows/try-enquiry.ts`, `weekly-summary.ts` |
 | "What happened": the audit log as plain sentences | `src/admin/feed.ts` |
-| Approve or automate, offers, spot checks | `src/automation.ts` |
-| WhatsApp approvals and buttons | `src/approvals.ts` |
+| Approve or automate, offers, spot checks (all in the Inbox) | `src/automation.ts`, `src/decisions.ts` |
 | Approve / reject / edit, shared by WhatsApp and the web app | `src/decisions.ts` |
 | One WhatsApp number: personal chats left alone, the owner's own replies, "ignore this person", Embedded Signup | `src/whatsapp-business.ts` |
 | Sending | `src/outbox.ts` |
@@ -135,6 +134,7 @@ Changes arrive as pull requests. To release one:
 
 | # | Date | What changed |
 |---|---|---|
+| 20 | 26 Nov 2026 | **The Inbox is the one place to deal with replies.** Owners are no longer messaged on WhatsApp: no approval requests, no "sent automatically" or "send this yourself" messages, no Friday summary (it stays on Overview). No platform number or Meta approval template is needed, and an owner's WhatsApp number is no longer asked for. The Inbox says how many customers need you, marks replies that went automatically, and shows wording to paste, text or say on its card; Meta delivery failures show as "Couldn't send" with the reason. |
 | 19 | 24 Nov 2026 | **One WhatsApp number for a sole trader:** connect the WhatsApp Business app number through Meta's Embedded Signup and keep using the app. Personal chats are left alone (saved contacts kept only as hashes; "Not a customer? Ignore"); a reply the owner sends from the app drops the waiting draft; the platform number is now optional (approve in the app). Triage agent 1.2.0 sets personal messages aside. |
 | 18 | 21 Nov 2026 | **Making it obvious:** all nine design ideas. Replies waiting one at a time; setup as a task list; This week, with an optional Friday WhatsApp summary; the flow as pictures and a sentence; **Try it**; the trust ladder; "What happened" in plain sentences with a switch-back link; plain words, a more readable font and bigger buttons throughout. |
 | 17 | 21 Nov 2026 | This README and `docs/design-ideas.md`. |
@@ -159,9 +159,8 @@ Changes arrive as pull requests. To release one:
    - Enable the Gmail API and the Google Calendar API.
    - Add the scopes listed in `src/integrations/google.ts`.
 5. **Meta (WhatsApp):**
-   - Create an app with WhatsApp, and register a phone number for the platform itself (this sends approvals to owners).
+   - Create an app with WhatsApp. Each business connects its own number; the platform has none of its own.
    - Point the webhook at `https://<your domain>/webhooks/whatsapp` with your `WA_VERIFY_TOKEN`, and subscribe to `messages`.
-   - Create the approval template (below) and wait for approval.
 6. **Install, migrate and publish the agents.** Preferably run the **Migrate production** GitHub Action (Actions tab → Run workflow), so your laptop never needs production access. From a terminal instead:
    ```bash
    npm install
@@ -169,12 +168,6 @@ Changes arrive as pull requests. To release one:
    npm run prod:agents:sync   # publishes config/agents/*.json as versioned definitions
    ```
 7. **Run two processes:** `server` (webhooks, admin app, public URL) and `worker` (jobs). Both come from one container image (`Dockerfile`), so any container host works. We use **Fly.io in London**; see [Deploying to Fly.io](#deploying-to-flyio).
-
-**Approval template** (Meta → WhatsApp Manager → Message templates). Category *Utility*, name `draft_ready_for_approval`, language English (UK).
-- Body: `{{1}}: new message from {{2}}. Suggested reply: {{3}}`
-- Quick-reply buttons: `Approve`, `Edit`, `Reject`
-
-This template is only used when the owner hasn't messaged the platform number in the last 24 hours. Otherwise approvals arrive as normal button messages.
 
 ## Deploying to Fly.io
 
@@ -213,7 +206,7 @@ Production secrets never live in files, code, chat or GitHub. They live in **Bit
 
 **Set up once**
 1. In Bitwarden, open **Secrets Manager** and create a project called `agents-as-a-service-production`.
-2. Add each production secret, named exactly as the variable in `.env.example`: `DATABASE_URL`, `DATA_ENCRYPTION_KEY`, `SIGNING_SECRET`, `ANTHROPIC_API_KEY`, `WA_APP_SECRET`, `WA_VERIFY_TOKEN`, `PLATFORM_WA_PHONE_NUMBER_ID`, `PLATFORM_WA_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_BASE_URL`. Names must have no spaces.
+2. Add each production secret, named exactly as the variable in `.env.example`: `DATABASE_URL`, `DATA_ENCRYPTION_KEY`, `SIGNING_SECRET`, `ANTHROPIC_API_KEY`, `WA_APP_SECRET`, `WA_VERIFY_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_BASE_URL`. Names must have no spaces.
 3. Create two **machine accounts**, each with read access to that project only:
    - `laptop`: its access token is stored as an item in your Bitwarden password manager, never in a file.
    - `github-actions`: its access token goes in GitHub → Settings → Environments → `production` → secret `BW_ACCESS_TOKEN`. In the same environment, add variables `BW_SECRET_ID_DATABASE_URL`, `BW_SECRET_ID_DATA_ENCRYPTION_KEY` and `BW_SECRET_ID_SIGNING_SECRET`, holding each secret's Bitwarden ID (not its value).
@@ -328,7 +321,6 @@ The tests wipe that database. They run whole journeys against real Postgres, wit
 - **Checkatrade** has no reply API and doesn't allow bots in its app, so the owner taps "I'm interested" themselves. The platform makes that take seconds.
 - **Booking systems** (Halaxy, Cliniko…) are linked to, not connected: the customer books on the business's own page, and the platform doesn't see those bookings yet.
 - **Try it uses real AI calls,** so it needs Claude API credit. It is limited to owners and 30 tries a day per business.
-- **The Friday WhatsApp summary** can only reach the owner inside WhatsApp's 24-hour window until the approval template is set up.
 - **Not built yet:** Outlook, Instagram and Facebook DMs, self-serve sign-up, billing, magic-link and Google sign-in, invite emails.
 
 ## Next build

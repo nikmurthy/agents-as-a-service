@@ -9,8 +9,7 @@ import { modelView } from "../privacy.js";
 import { calendarConnection, confirmHold, createHold, isFree, openHolds, releaseHold } from "../calendar.js";
 import { getConnection } from "../connections.js";
 import { audit } from "../audit.js";
-import { checkatradeSteps, isNewLead, openLead, recordLead, suggestForLead } from "../leads.js";
-import { notifyOwners } from "../outbox.js";
+import { isNewLead, recordLead, suggestForLead } from "../leads.js";
 import { approveOrAsk, categorise, queueNext } from "../automation.js";
 
 export interface BookingConfig { mode?: "owner" | "link"; system?: string; link?: string }
@@ -27,7 +26,7 @@ const ESCALATE_INTENTS = new Set(["emergency", "complaint", "clinical_question"]
 
 /**
  * Use cases "answer enquiries" + "book appointments", for one inbound message:
- * triage -> (booking) -> draft -> independent review -> approval request to the owner.
+ * triage -> (booking) -> draft -> independent review -> waits in the Inbox for the owner (or sends, if automated).
  * Agents judge; the fixed rules here decide what is allowed. Nothing reaches a customer without the owner's approval.
  */
 export async function answerEnquiry(tenantId: string, messageId: string, now = new Date()): Promise<void> {
@@ -78,13 +77,8 @@ export async function answerEnquiry(tenantId: string, messageId: string, now = n
       // A new Checkatrade lead: suggest "I'm interested" or "Not for me" (the owner does it in Checkatrade by hand).
       const lead = msg.channel === "checkatrade" && isNewLead(msg.structured) ? suggestForLead(triage) : undefined;
       if (lead) await recordLead(db, { id: messageId, conv_id: msg.conv_id, structured: msg.structured }, lead);
-      if (triage.intent === "spam" || triage.nextStep === "ignore") {
-        if (lead) {
-          const first = (msg.from_name ?? msg.contact_name ?? "a customer").split(/\s+/)[0];
-          await notifyOwners(db, `${tenant.name}\n\nCheckatrade lead from ${first} looks like one to turn down: ${lead.reason}.\n\n${checkatradeSteps(await openLead(db, msg.conv_id), "not_for_me", lead.reason)}`);
-        }
-        return finish("ignored", "Spam or irrelevant.", { triage });
-      }
+      // A Checkatrade lead to turn down shows in the Inbox with the steps (Checkatrade has no API for it).
+      if (triage.intent === "spam" || triage.nextStep === "ignore") return finish("ignored", "Spam or irrelevant.", { triage });
       const mustEscalate = triage.urgency === "emergency" || triage.nextStep === "escalate" || ESCALATE_INTENTS.has(triage.intent);
 
       // 2. Booking (only with the use case on, a calendar connected, and nothing that needs the owner first)

@@ -15,7 +15,7 @@ export function People() {
   if (!data) return <Loading />;
   return (
     <Page title="People" actions={canManage && <button className="primary" onClick={() => setEditing("new")}>Add someone</button>}>
-      <p className="muted">Owners can change everything. Staff can read messages and approve replies. Approvers get replies to check on WhatsApp.</p>
+      <p className="muted">Owners can change everything. Staff can read messages and approve replies in the Inbox.</p>
       {editing === "new" && <Editor id={id} onDone={() => { setEditing(null); reload(); }} />}
       <ErrorNote message={act.error} />
       <div className="list">
@@ -24,8 +24,8 @@ export function People() {
         ) : (
           <div key={m.id} className="row">
             <div>
-              <strong>{m.name}</strong> <span className="pill muted">{m.role}</span> {m.isApprover && <span className="pill good">approver</span>}
-              <div className="muted">{[m.email, m.whatsapp].filter(Boolean).join(" · ")}{m.email && !m.hasLoggedIn ? " · hasn't signed in yet" : ""}</div>
+              <strong>{m.name}</strong> <span className="pill muted">{m.role}</span>
+              <div className="muted">{m.email}{m.email && !m.hasLoggedIn ? " · hasn't signed in yet" : ""}</div>
             </div>
             {canManage && (
               <div className="row-meta">
@@ -56,8 +56,6 @@ function Editor({ id, member, onDone }: { id: string; member?: any; onDone: () =
         <Field label="Role">
           <select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Draft["role"] })}><option value="staff">Staff</option><option value="owner">Owner</option></select>
         </Field>
-        <Field label="WhatsApp number"><input inputMode="tel" value={f.whatsapp} onChange={(e) => setF({ ...f, whatsapp: e.target.value })} /></Field>
-        <label className="check"><input type="checkbox" checked={f.isApprover} onChange={(e) => setF({ ...f, isApprover: e.target.checked })} /> Gets replies to approve on WhatsApp</label>
         <ErrorNote message={error} />
         <div className="buttons"><button className="primary" disabled={busy}>Save</button><button type="button" onClick={onDone}>Cancel</button></div>
       </form>

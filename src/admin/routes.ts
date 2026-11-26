@@ -99,8 +99,8 @@ admin.post("/businesses", async (c) => {
 admin.get("/businesses/:id", async (c) => {
   const { tenantId } = tenantAccess(c, c.req.param("id"));
   return c.json(await withTenant(tenantId, async (db) => {
-    const t = await one(db, "select id, slug, name, pack, status, created_at, coalesce((settings->>'weeklySummary')::boolean, false) as weekly_summary from tenants where id = app_current_tenant()");
-    if (!t) throw notFound();
+    const business = await one(db, "select id, slug, name, pack, status, created_at from tenants where id = app_current_tenant()");
+    if (!business) throw notFound();
     const numbers = await one(db,
       `select
          (select count(*)::int from messages where direction = 'in' and received_at > now() - interval '24 hours') as messages_today,
@@ -114,20 +114,8 @@ admin.get("/businesses/:id", async (c) => {
       brokenConnections: await many(db, "select id, kind, label, last_error from channel_connections where status = 'error'"),
       failedRuns: await many(db, "select id, error, created_at from runs where status = 'failed' and created_at > now() - interval '7 days' order by created_at desc limit 20"),
     };
-    const { weekly_summary, ...business } = t;
-    return { business, numbers, attention, week: await weekNumbers(db), weeklySummary: weekly_summary };
+    return { business, numbers, attention, week: await weekNumbers(db) };
   }));
-});
-
-// Overview → "This week": the owner can also have it on WhatsApp on Friday afternoons.
-admin.put("/businesses/:id/weekly-summary", async (c) => {
-  const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
-  const { on } = await parse(c, z.object({ on: z.boolean() }).strict());
-  await withTenant(tenantId, async (db) => {
-    await db.query("update tenants set settings = settings || $1::jsonb where id = app_current_tenant()", [{ weeklySummary: on }]);
-    await audit(db, { tenantId, actor: actor.audit, action: "weekly_summary.changed", entity: "tenant", entityId: tenantId, detail: { on } });
-  });
-  return c.json({ ok: true, on });
 });
 
 // Overview → replies waiting, one at a time: each reply with what the customer said, the most urgent first.
@@ -151,7 +139,6 @@ admin.get("/businesses/:id/setup", async (c) => {
   const t = await withTenant(tenantId, async (db) => ({
     tenant: await one(db, "select status, settings from tenants where id = app_current_tenant()"),
     conns: await many<{ kind: string; status: string }>(db, "select kind, status from channel_connections where status <> 'disconnected'"),
-    approvers: await one<{ n: number }>(db, "select count(*)::int as n from tenant_members where is_approver and whatsapp_phone is not null"),
     useCases: await many<{ use_case: string; enabled: boolean }>(db, "select use_case, enabled from tenant_use_cases"),
   }));
   if (!t.tenant) throw notFound();
@@ -170,10 +157,6 @@ admin.get("/businesses/:id/setup", async (c) => {
       why: "Connect Gmail, a WhatsApp number, a website form or Checkatrade.", fix: "connections", needs: ["Your Google login"] },
     ...(bookingMode === "calendar" ? [{ key: "calendar", done: has("google_calendar"), label: "Google Calendar connected",
       why: "Booking offers real free times and pencils them in this calendar.", fix: "connections", needs: ["Your Google login"] }] : []),
-    { key: "approver", done: (t.approvers?.n ?? 0) > 0, label: "Someone to approve replies",
-      why: "A person with a WhatsApp number who approves replies before they're sent.", fix: "people", needs: ["Your work mobile number"] },
-    { key: "whatsapp", done: ready.whatsapp, label: "Platform WhatsApp is set up", optional: true,
-      why: "Approval requests are sent from the platform's WhatsApp number. Until then, approve in this app.", fix: "/platform", admin: true },
   ];
   // Switching on waits for everything that isn't optional.
   const ready_ = list.every((x) => x.done || x.optional);
@@ -473,7 +456,6 @@ admin.post("/businesses/:id/members", async (c) => {
   const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
   const m = await parse(c, memberFields);
   const phone = m.whatsapp ? normalisePhone(m.whatsapp) : undefined;
-  if (m.isApprover && !phone) throw new HTTPException(400, { message: "Approvers need a WhatsApp number" });
   const email = normaliseEmail(m.email);
   const id = await withTenant(tenantId, async (db) => {
     if (email && await one(db, "select 1 from tenant_members where lower(email) = $1", [email])) throw new HTTPException(409, { message: "Someone with that email is already in this business" });
@@ -491,7 +473,6 @@ admin.put("/businesses/:id/members/:memberId", async (c) => {
   const memberId = uuid(c.req.param("memberId"));
   const m = await parse(c, memberFields);
   const phone = m.whatsapp ? normalisePhone(m.whatsapp) : undefined;
-  if (m.isApprover && !phone) throw new HTTPException(400, { message: "Approvers need a WhatsApp number" });
   await withTenant(tenantId, async (db) => {
     const cur = await one<{ role: string }>(db, "select role from tenant_members where id = $1 for update", [memberId]);
     if (!cur) throw notFound();
@@ -534,7 +515,9 @@ admin.get("/businesses/:id/conversations", async (c) => {
      from conversations v join contacts ct on ct.id = v.contact_id
      where ($1::boolean is false or exists (select 1 from drafts d where d.conversation_id = v.id and d.status = 'pending_approval'))
      order by greatest(v.last_inbound_at, v.created_at) desc limit $2`, [waiting, limitOf(c, 50, 100)]));
-  return c.json({ conversations: rows });
+  const needsYou = await withTenant(tenantId, (db) => one<{ n: number }>(db,
+    "select count(distinct conversation_id)::int as n from drafts where status = 'pending_approval'"));
+  return c.json({ conversations: rows, needsYou: needsYou!.n });
 });
 
 admin.get("/businesses/:id/conversations/:convId", async (c) => {
@@ -548,7 +531,10 @@ admin.get("/businesses/:id/conversations/:convId", async (c) => {
     if (!conv) return undefined;
     return {
       conversation: conv,
-      messages: await many(db, "select id, direction, channel, subject, body, from_name, data_tags, received_at from messages where conversation_id = $1 order by received_at", [convId]),
+      messages: await many(db,
+        `select m.id, m.direction, m.channel, m.subject, m.body, m.from_name, m.data_tags, m.received_at,
+           exists (select 1 from outbox o join drafts d on d.id = o.draft_id where o.provider_message_id = m.channel_message_id and d.auto_sent) as auto_sent
+         from messages m where m.conversation_id = $1 order by m.received_at`, [convId]),
       drafts: await many(db,
         `select id, kind, category, auto_sent, reply_route, body, original_body, (body <> original_body) as edited, review, needs_attention, attention_reason, status, created_at, decided_at,
            (select o.error from outbox o where o.draft_id = drafts.id) as send_error
@@ -817,7 +803,6 @@ admin.get("/map", async (c) => {
       drafts: await kv("select status as k, count(*)::int as n from drafts where created_at > now() - interval '7 days' group by status"),
       edited: (await one<{ n: number }>(db, "select count(*)::int as n from drafts where status = 'sent' and body <> original_body and created_at > now() - interval '7 days'"))!.n,
       holds: await kv("select status as k, count(*)::int as n from holds where created_at > now() - interval '7 days' group by status"),
-      approvers: (await one<{ n: number }>(db, "select count(*)::int as n from tenant_members where is_approver and whatsapp_phone is not null"))!.n,
       dataRequests: (await one<{ n: number }>(db, "select count(*)::int as n from data_requests"))!.n,
       suppressed: (await one<{ n: number }>(db, "select count(*)::int as n from suppression"))!.n,
       audit7d: (await one<{ n: number }>(db, "select count(*)::int as n from audit_log where at > now() - interval '7 days'"))!.n,
