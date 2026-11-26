@@ -115,6 +115,8 @@ export function describe(r: any, tz: string): FeedItem | undefined {
       }
       return item("assistant", `Sent the ${kind} to ${name} by ${by}.`);
     }
+    case "reply.owner_written":
+      return item("you", `${you} wrote to ${name} by ${by}.`, r.detail?.replaced ? "The reply that was waiting for you was dropped, so they only get yours." : undefined);
     case "reply.manual":
       return item("assistant", `Gave you the wording for ${name}, to send yourself by ${by}.`, "This route can't be sent automatically.");
     case "reply.failed":

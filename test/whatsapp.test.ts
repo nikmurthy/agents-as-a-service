@@ -26,6 +26,7 @@ const { app, googleConnectLink, whatsappConnectLink } = await import("../src/app
 const { taskList } = await import("../src/jobs/tasks.js");
 const { releaseQueue } = await import("../src/jobs/queue.js");
 const { ignorePerson, stopIgnoring } = await import("../src/whatsapp-business.js");
+const { replyPlan, sendOwnerReply } = await import("../src/owner-reply.js");
 const { feed } = await import("../src/admin/feed.js");
 const { runOnce, Logger } = await import("graphile-worker");
 const { fakeGoogle, fakeWhatsApp, waWebhook } = await import("./fakes.js");
@@ -221,6 +222,38 @@ test("ignore this person: what's waiting is dropped, their text forgotten, and n
   await say(LATE, "Hello again", "Lee");
   await drain();
   assert.equal((await stored(LATE)).length, 2);
+});
+
+test("owner writes their own reply in the Inbox: checked first, waiting draft dropped, sent by WhatsApp", async () => {
+  const OLA = "+447700900960";
+  await say(OLA, "Hi, can you quote for oak flooring in a lounge?", "Ola");
+  await drain();
+  const [d] = await draftsFor(OLA);
+  assert.equal(d.status, "pending_approval");
+  const conv = (await withTenant(A, (db) => one<{ conversation_id: string }>(db, "select conversation_id from drafts where id = $1", [d.id])))!.conversation_id;
+
+  const p = await replyPlan(A, conv);
+  assert.deepEqual([p?.canSend, p?.route, p?.customer, p?.replaces, p?.to], [true, "whatsapp", "Ola", 1, OLA]);
+  const actor = { memberId: null, audit: "member:test" };
+  const r = await sendOwnerReply(A, actor, conv, "Hi Ola, Sam here. I can come Friday at 10 to measure up.");
+  assert.equal(r.ok, true);
+  await drain();
+  const drafts = await draftsFor(OLA);
+  assert.deepEqual(drafts.map((x) => x.status), ["superseded", "sent"], "the waiting draft is dropped; the owner's is sent");
+  assert.equal(wa.sent.filter((m) => m.to === OLA).length, 1, "the customer gets exactly one message");
+  assert.match(wa.last(OLA)!.text ?? "", /Friday at 10/);
+  const items = await withTenant(A, (db) => feed(db, "Europe/London"));
+  assert.ok(items.some((i) => i.text.endsWith("wrote to Ola by WhatsApp.") && /dropped/.test(i.why ?? "")));
+
+  // More than 24 hours after their last message, WhatsApp won't allow it: say so, send nothing.
+  await withTenant(A, (db) => db.query("update conversations set whatsapp_window_closes_at = now() - interval '1 hour' where id = $1", [conv]));
+  const late = await replyPlan(A, conv);
+  assert.equal(late?.canSend, false);
+  assert.match(late?.reason ?? "", /24 hours/);
+  assert.equal((await sendOwnerReply(A, actor, conv, "Hello again")).ok, false);
+  assert.equal(wa.sent.filter((m) => m.to === OLA).length, 1);
+
+  assert.equal(await replyPlan(B, conv), undefined, "another business can't see or reply to it");
 });
 
 async function setPeople(people: string) {

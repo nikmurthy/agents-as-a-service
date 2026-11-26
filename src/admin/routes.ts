@@ -18,6 +18,7 @@ import { FEEDBACK_AFTER_DAYS, feedbackWording } from "../workflows/ask-feedback.
 import { loadTenant } from "../tenants.js";
 import { releaseHold } from "../calendar.js";
 import { clients } from "../integrations/index.js";
+import { replyPlan, sendOwnerReply } from "../owner-reply.js";
 import { exportPerson, erasePerson, suppress } from "../data-rights.js";
 import { normaliseEmail, normalisePhone } from "../channels/parse.js";
 import { platformStatus, servicesReady, testService } from "./platform.js";
@@ -549,7 +550,8 @@ admin.get("/businesses/:id/conversations/:convId", async (c) => {
       conversation: conv,
       messages: await many(db, "select id, direction, channel, subject, body, from_name, data_tags, received_at from messages where conversation_id = $1 order by received_at", [convId]),
       drafts: await many(db,
-        `select id, kind, category, auto_sent, reply_route, body, original_body, (body <> original_body) as edited, review, needs_attention, attention_reason, status, created_at, decided_at
+        `select id, kind, category, auto_sent, reply_route, body, original_body, (body <> original_body) as edited, review, needs_attention, attention_reason, status, created_at, decided_at,
+           (select o.error from outbox o where o.draft_id = drafts.id) as send_error
          from drafts where conversation_id = $1 order by created_at`, [convId]),
       lead: (await one(db, "select job_ref, job_url, suggestion, suggestion_reason, decision, decided_at, details_added_at from checkatrade_leads where conversation_id = $1 order by created_at desc limit 1", [convId])) ?? null,
       contact: await one(db,
@@ -560,6 +562,21 @@ admin.get("/businesses/:id/conversations/:convId", async (c) => {
   });
   if (!out) throw notFound();
   return c.json(out);
+});
+
+// The owner writes their own reply. First what would happen (route, who, why not), then the send itself.
+admin.get("/businesses/:id/conversations/:convId/reply", async (c) => {
+  const { tenantId } = tenantAccess(c, c.req.param("id"));
+  const p = await replyPlan(tenantId, uuid(c.req.param("convId")));
+  if (!p) throw notFound();
+  return c.json(p);
+});
+admin.post("/businesses/:id/conversations/:convId/reply", async (c) => {
+  const { tenantId, actor } = tenantAccess(c, c.req.param("id"));
+  const { body } = await parse(c, z.object({ body: z.string().trim().min(1, "Write something first").max(4000) }));
+  const r = await sendOwnerReply(tenantId, actor, uuid(c.req.param("convId")), body);
+  if (!r.ok) throw r.notFound ? notFound() : new HTTPException(409, { message: r.reason });
+  return c.json({ ok: true, route: r.plan.route, customer: r.plan.customer });
 });
 
 // "Ignore this person": a personal chat, not a customer. Drops what's waiting, forgets their message text.
