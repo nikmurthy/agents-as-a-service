@@ -17,6 +17,7 @@ import { CHASE_AFTER_DAYS } from "../workflows/chase-quotes.js";
 import { FEEDBACK_AFTER_DAYS, feedbackWording } from "../workflows/ask-feedback.js";
 import { loadTenant } from "../tenants.js";
 import { releaseHold } from "../calendar.js";
+import { clients } from "../integrations/index.js";
 import { exportPerson, erasePerson, suppress } from "../data-rights.js";
 import { normaliseEmail, normalisePhone } from "../channels/parse.js";
 import { platformStatus, servicesReady, testService } from "./platform.js";
@@ -403,16 +404,24 @@ admin.get("/businesses/:id/connections/google-link", (c) => {
 admin.post("/businesses/:id/connections/whatsapp", async (c) => {
   const { tenantId, actor } = tenantAccess(c, c.req.param("id"), "manage");
   const { phoneNumberId, accessToken } = await parse(c, z.object({
-    phoneNumberId: z.string().trim().regex(/^\d{5,30}$/, "The phone number ID is a long number from Meta"),
+    phoneNumberId: z.string().trim().regex(/^\d{5,30}$/, "The Phone number ID is a long number from Meta, with no + or spaces"),
     accessToken: z.string().trim().min(10).max(2000),
   }));
+  // Ask Meta before saving: a phone number or the account ID pasted here would otherwise connect and then silently get nothing.
+  let display: string | undefined;
   try {
-    await connectWhatsApp(tenantId, phoneNumberId, accessToken, actor.audit);
+    display = (await clients.whatsapp.numberInfo({ phoneNumberId, accessToken })).displayPhone;
+  } catch (e: any) {
+    console.warn("WhatsApp connect check failed:", String(e?.message ?? e).slice(0, 200));
+  }
+  if (!display) throw new HTTPException(400, { message: "Meta doesn't know that as a Phone number ID for this token. In Meta, open WhatsApp → API Setup and copy the \"Phone number ID\" shown under the number (not the phone number or the account ID), and check the token is for the same app." });
+  try {
+    await connectWhatsApp(tenantId, phoneNumberId, accessToken, actor.audit, display);
   } catch (e: any) {
     if (/row-level security|duplicate key/.test(String(e?.message))) throw new HTTPException(409, { message: "That number is already connected to a business" });
     throw e;
   }
-  return c.json({ ok: true });
+  return c.json({ ok: true, display });
 });
 
 admin.post("/businesses/:id/connections/webhook", async (c) => {

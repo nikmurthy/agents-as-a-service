@@ -51,12 +51,12 @@ export async function tenantBySlug(slug: string) {
 }
 
 /** Until Meta Embedded Signup is set up: store the business's WhatsApp phone number id and token by hand. */
-export async function connectWhatsApp(tenantId: string, phoneNumberId: string, accessToken: string, by = "admin") {
+export async function connectWhatsApp(tenantId: string, phoneNumberId: string, accessToken: string, by = "admin", label?: string) {
   await withTenant(tenantId, async (db) => {
     await db.query(
-      `insert into channel_connections (tenant_id, kind, external_id, secret_ciphertext) values (app_current_tenant(), 'whatsapp', $1, $2)
-       on conflict (kind, external_id) do update set secret_ciphertext = excluded.secret_ciphertext, status = 'active'`,
-      [phoneNumberId, encryptJson({ accessToken })]);
+      `insert into channel_connections (tenant_id, kind, external_id, secret_ciphertext, label) values (app_current_tenant(), 'whatsapp', $1, $2, $3)
+       on conflict (kind, external_id) do update set secret_ciphertext = excluded.secret_ciphertext, label = coalesce(excluded.label, channel_connections.label), status = 'active'`,
+      [phoneNumberId, encryptJson({ accessToken }), label ?? null]);
     await audit(db, { tenantId, actor: by, action: "whatsapp.connected" });
   });
 }

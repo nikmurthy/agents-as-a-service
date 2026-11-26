@@ -128,6 +128,18 @@ test("one business can't see or change another", async () => {
   assert.equal((await withTenant(B, (db) => one<{ status: string }>(db, "select status from drafts where id = $1", [draftId])))!.status, "pending_approval");
 });
 
+test("connecting a number by ID: Meta is asked first, so a wrong ID is refused with a reason", async () => {
+  const bad = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "999111222333", accessToken: "tokentokentoken" });
+  assert.equal(bad.status, 400);
+  assert.match(bad.json.error ?? bad.json.message ?? JSON.stringify(bad.json), /Phone number ID/);
+  assert.equal((await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "+1 555 123 4567", accessToken: "tokentokentoken" })).status, 400, "a phone number isn't an ID");
+  const ok = await api("ownerA", "POST", `/businesses/${A}/connections/whatsapp`, { phoneNumberId: "106540352242922", accessToken: "tokentokentoken" });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.display, "+44 7700 900777");
+  const conn = await withTenant(A, (db) => one(db, "select label from channel_connections where external_id = '106540352242922'"));
+  assert.equal(conn?.label, "+44 7700 900777");
+});
+
 test("staff can look and decide on replies but not change settings or people", async () => {
   assert.equal((await api("staffA", "GET", `/businesses/${A}/settings`)).json.canEdit, false);
   const s = (await api("ownerA", "GET", `/businesses/${A}/settings`)).json.settings;
