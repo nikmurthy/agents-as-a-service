@@ -55,7 +55,49 @@ export function Conversation() {
       <JobDone conv={data.conversation} bizId={id} onChange={reload} />
       <Personal conv={data.conversation} bizId={id} onChange={reload} />
       {data.drafts.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} leadPending={data.lead?.decision === "pending" && d.kind === "reply"} />)}
+      {!data.conversation.ignored_at && <WriteReply convId={data.conversation.id} bizId={id} onChange={reload} />}
     </Page>
+  );
+}
+
+/**
+ * Write your own reply. "Check before sending" shows exactly what goes, to whom and how; only then can it be sent.
+ * A reply still waiting for approval is replaced, so the customer never gets two.
+ */
+function WriteReply({ convId, bizId, onChange }: { convId: string; bizId: string; onChange: () => void }) {
+  const [text, setText] = useState("");
+  const [plan, setPlan] = useState<any>();
+  const [sent, setSent] = useState<string>();
+  const { busy, error, run } = useAction();
+  const check = () => run(async () => { setSent(undefined); setPlan(await get(`/businesses/${bizId}/conversations/${convId}/reply`)); });
+  const send = () => run(async () => {
+    await post(`/businesses/${bizId}/conversations/${convId}/reply`, { body: text });
+    setSent(`Sending to ${plan.customer} by ${ROUTE[plan.route] ?? plan.route}.`); setText(""); setPlan(undefined); onChange();
+  });
+  return (
+    <Card title="Write your own reply">
+      {!plan ? (
+        <>
+          <label className="sr-only" htmlFor="own-reply">Your reply</label>
+          <textarea id="own-reply" rows={4} value={text} onChange={(e) => { setText(e.target.value); setSent(undefined); }} placeholder="Type what you'd like to say" />
+          <ErrorNote message={error} />
+          {sent && <p className="note good" role="status">{sent}</p>}
+          <div className="buttons"><button className="primary" disabled={busy || !text.trim()} onClick={check}>Check before sending</button></div>
+        </>
+      ) : (
+        <>
+          <p><strong>{plan.canSend ? `This goes to ${plan.customer} by ${ROUTE[plan.route] ?? plan.route}` : "This can't be sent from here"}</strong>{plan.canSend && plan.to ? <span className="muted"> ({plan.to})</span> : null}</p>
+          <div className="bubble out preview"><p>{text}</p></div>
+          {plan.canSend && plan.replaces > 0 && <p className="note">The reply waiting for you will be dropped, so {plan.customer} only gets this one.</p>}
+          {!plan.canSend && <p className="note bad" role="alert">{plan.reason}</p>}
+          <ErrorNote message={error} />
+          <div className="buttons">
+            {plan.canSend && <button className="primary" disabled={busy} onClick={send}>Send</button>}
+            <button disabled={busy} onClick={() => setPlan(undefined)}>Change it</button>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 

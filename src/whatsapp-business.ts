@@ -51,7 +51,7 @@ export async function saveContacts(tenantId: string, items: WaSavedContact[]): P
 }
 
 /** Drops pending drafts in a conversation (never sent), freeing any times held for them. Returns how many. */
-async function dropPendingDrafts(db: Db, where: string, param: string): Promise<number> {
+export async function dropPendingDrafts(db: Db, where: string, param: string): Promise<number> {
   const drafts = await many<{ id: string; booking: any }>(db,
     `select d.id, r.booking from drafts d left join runs r on r.id = d.run_id
      where d.status = 'pending_approval' and ${where} for update of d`, [param]);
