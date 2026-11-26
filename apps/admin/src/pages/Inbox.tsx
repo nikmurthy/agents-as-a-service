@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { get, post, put } from "../api";
 import { useBiz } from "../ctx";
 import { Card, Empty, ErrorNote, Loading, Page, Status, useAction, useLoad, when } from "../ui";
 
+const CHANNEL: Record<string, string> = { whatsapp: "WhatsApp", email: "email", checkatrade: "Checkatrade", checkatrade_message: "Checkatrade", web_form: "website form", sms: "text", phone: "phone" };
 const ROUTE: Record<string, string> = { whatsapp: "WhatsApp", email: "email", checkatrade_message: "Checkatrade (paste in)", sms: "text (send yourself)", phone: "phone call" };
 
 export function Inbox() {
@@ -37,16 +38,38 @@ export function Conversation() {
   const { id } = useBiz();
   const { convId } = useParams();
   const { data, error, reload } = useLoad(() => get(`/businesses/${id}/conversations/${convId}`), [id, convId]);
+  // Replies on their way show in the thread as "Sending…"; check back until they've gone (or failed).
+  const sending: any[] = data?.drafts.filter((d: any) => d.status === "approved") ?? [];
+  useEffect(() => {
+    if (!sending.length) return;
+    const t = setTimeout(reload, 2500);
+    return () => clearTimeout(t);
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   if (error) return <ErrorNote message={error} />;
   if (!data) return <Loading />;
+  const failed: any[] = data.drafts.filter((d: any) => d.status === "failed");
+  // Cards are for what needs you: replies to approve, and ones to send yourself. Sent ones are in the thread above.
+  const cards = data.drafts.filter((d: any) => d.status === "pending_approval" || d.status === "manual");
   return (
     <Page title={data.conversation.name ?? "Conversation"} actions={<Link to={`/b/${id}/inbox`}>Back to inbox</Link>}>
       <div className="thread">
         {data.messages.map((m: any) => (
           <div key={m.id} className={`bubble ${m.direction}`}>
-            <div className="muted small">{m.direction === "in" ? (m.from_name ?? "Customer") : "Sent"} · {m.channel.replace("_", " ")} · {when(m.received_at)}</div>
+            <div className="muted small">{m.direction === "in" ? (m.from_name ?? "Customer") : m.from_name === "owner" ? "You, from the WhatsApp app" : "✓ Sent"} · {CHANNEL[m.channel] ?? m.channel.replace("_", " ")} · {when(m.received_at)}</div>
             {m.subject && <strong>{m.subject}</strong>}
             <p>{m.body ?? <em className="muted">Removed</em>}</p>
+          </div>
+        ))}
+        {sending.map((d: any) => (
+          <div key={d.id} className="bubble out sending" role="status">
+            <div className="muted small">Sending… · {ROUTE[d.reply_route] ?? d.reply_route}</div>
+            <p>{d.body}</p>
+          </div>
+        ))}
+        {failed.map((d: any) => (
+          <div key={d.id} className="bubble out failed" role="alert">
+            <div className="small"><strong>Couldn't send</strong>{d.send_error ? `: ${d.send_error}` : ""}</div>
+            <p>{d.body}</p>
           </div>
         ))}
       </div>
@@ -54,7 +77,7 @@ export function Conversation() {
       <Quote conv={data.conversation} bizId={id} onChange={reload} />
       <JobDone conv={data.conversation} bizId={id} onChange={reload} />
       <Personal conv={data.conversation} bizId={id} onChange={reload} />
-      {data.drafts.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} leadPending={data.lead?.decision === "pending" && d.kind === "reply"} />)}
+      {cards.map((d: any) => <Draft key={d.id} draft={d} bizId={id} onChange={reload} leadPending={data.lead?.decision === "pending" && d.kind === "reply"} />)}
       {!data.conversation.ignored_at && <WriteReply convId={data.conversation.id} bizId={id} onChange={reload} />}
     </Page>
   );
