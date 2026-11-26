@@ -228,6 +228,23 @@ export function parseWhatsAppWebhook(body: any): WaInbound[] {
   return out;
 }
 
+/** Meta saying a message we sent couldn't be delivered. Sending is accepted first; this arrives seconds later. */
+export interface WaFailure { phoneNumberId: string; id: string; code?: number; title?: string; detail?: string }
+
+export function parseWhatsAppFailures(body: any): WaFailure[] {
+  const out: WaFailure[] = [];
+  for (const entry of body?.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      for (const st of change.value?.statuses ?? []) {
+        if (st.status !== "failed" || !st.id) continue;
+        const e = st.errors?.[0] ?? {};
+        out.push({ phoneNumberId: change.value.metadata?.phone_number_id, id: st.id, code: e.code, title: e.title ?? e.message, detail: e.error_data?.details });
+      }
+    }
+  }
+  return out;
+}
+
 /** A message the owner sent from the WhatsApp Business app on a shared ("coexistence") number. */
 export interface WaEcho { phoneNumberId: string; to: string; id: string; timestamp: string; type: string; text?: string }
 

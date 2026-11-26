@@ -4,7 +4,7 @@ import { audit } from "./audit.js";
 import { encryptJson, phoneHash } from "./crypto.js";
 import { clients } from "./integrations/index.js";
 import { releaseHold } from "./calendar.js";
-import type { WaEcho, WaSavedContact } from "./channels/parse.js";
+import type { WaEcho, WaFailure, WaSavedContact } from "./channels/parse.js";
 
 /**
  * One WhatsApp number for a sole trader. The number they already use in the WhatsApp Business app is shared with
@@ -82,6 +82,35 @@ export async function ownerReplied(tenantId: string, e: WaEcho): Promise<void> {
        new Date(Number(e.timestamp) * 1000 || Date.now()).toISOString()]);
     const dropped = await dropPendingDrafts(db, "d.conversation_id = $1", conv.id);
     await audit(db, { tenantId, actor: "owner", action: "reply.owner_answered", entity: "conversation", entityId: conv.id, detail: { dropped } });
+  });
+}
+
+/** What Meta's delivery error codes mean, for the owner. The rest show Meta's own wording. */
+const WA_ERRORS: Record<number, string> = {
+  131030: "this number isn't on the test number's list of allowed recipients (Meta: API Setup, the \"To\" list)",
+  131047: "more than 24 hours have passed since the customer's last message, so WhatsApp won't deliver a free reply",
+  131026: "WhatsApp couldn't deliver it to this number (they may not use WhatsApp, or need to update or accept WhatsApp's terms)",
+  131049: "Meta held it back to protect the customer from too many business messages",
+  131042: "Meta has a payment problem with your WhatsApp account (WhatsApp Manager: Payment settings)",
+  131031: "Meta has locked or restricted your WhatsApp account",
+  131056: "too many messages to this person in a short time; try again shortly",
+};
+
+/**
+ * Meta accepted a reply and then couldn't deliver it. Mark it failed with the reason, so the Inbox says
+ * "Couldn't send" instead of "Sent". The message is removed from the thread, as the customer never got it.
+ */
+export async function deliveryFailed(tenantId: string, f: WaFailure): Promise<void> {
+  const reason = (f.code && WA_ERRORS[f.code]) ?? `Meta said: ${f.detail ?? f.title ?? "it couldn't be delivered"}`;
+  // The code and title are Meta's, never personal data.
+  console.warn("WhatsApp reply not delivered:", f.code, f.title);
+  await withTenant(tenantId, async (db) => {
+    const ob = await one<{ id: string; draft_id: string | null }>(db,
+      "update outbox set status = 'failed', error = $2 where provider_message_id = $1 and route = 'whatsapp' returning id, draft_id", [f.id, reason]);
+    if (!ob) return;
+    if (ob.draft_id) await db.query("update drafts set status = 'failed' where id = $1", [ob.draft_id]);
+    await db.query("delete from messages where direction = 'out' and channel = 'whatsapp' and channel_message_id = $1", [f.id]);
+    await audit(db, { tenantId, actor: "system", action: "reply.failed", entity: "draft", entityId: ob.draft_id ?? undefined, detail: { reason, code: f.code } });
   });
 }
 

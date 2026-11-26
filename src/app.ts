@@ -3,8 +3,8 @@ import { env } from "./env.js";
 import { one, withAdmin, withTenant } from "./db.js";
 import { encryptJson, randomToken, sign, verify, verifyMetaSignature } from "./crypto.js";
 import { clients } from "./integrations/index.js";
-import { parseCheckatradeWebhook, parseSmsRelay, parseWebForm, parseWhatsAppContactSync, parseWhatsAppEchoes, parseWhatsAppWebhook, waToInbound } from "./channels/parse.js";
-import { businessForNumber, finishWhatsAppSignup, isForTheBusiness, ownerReplied, saveContacts } from "./whatsapp-business.js";
+import { parseCheckatradeWebhook, parseSmsRelay, parseWebForm, parseWhatsAppContactSync, parseWhatsAppEchoes, parseWhatsAppFailures, parseWhatsAppWebhook, waToInbound } from "./channels/parse.js";
+import { businessForNumber, deliveryFailed, finishWhatsAppSignup, isForTheBusiness, ownerReplied, saveContacts } from "./whatsapp-business.js";
 import { ingest } from "./ingest.js";
 import { handleOwnerMessage } from "./approvals.js";
 import { audit } from "./audit.js";
@@ -52,6 +52,11 @@ app.post("/webhooks/whatsapp", async (c) => {
   for (const e of parseWhatsAppEchoes(body)) {
     const n = await businessForNumber(e.phoneNumberId);
     if (n) await ownerReplied(n.tenantId, e);
+  }
+  // A reply Meta accepted but couldn't deliver.
+  for (const f of parseWhatsAppFailures(body)) {
+    const n = await businessForNumber(f.phoneNumberId);
+    if (n) await deliveryFailed(n.tenantId, f);
   }
   // The contacts saved in the owner's WhatsApp Business app (kept only as hashes).
   const synced = parseWhatsAppContactSync(body);
